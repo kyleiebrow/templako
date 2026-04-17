@@ -1,4 +1,33 @@
-flask==2.3.3
-flask-cors==4.0.0
-flask-mail==0.9.1
+# Core
+Flask==2.3.3
+Flask-CORS==4.0.0
+Flask-SocketIO==5.3.4
+python-socketio==5.9.0
+flask-session==0.5.0
+
+# Database
+supabase==2.3.0
+supabase-py==1.0.3
+SQLAlchemy==2.0.23
+psycopg2-binary==2.9.9
+
+# Auth
 bcrypt==4.0.1
+
+# Images
+Pillow==10.0.0
+
+# Config
+python-dotenv==1.0.0
+
+# Location
+geopy==2.4.0
+
+# HTTP
+requests==2.31.0
+
+# WebSocket
+eventlet==0.33.3
+
+# Production
+gunicorn==21.2.0

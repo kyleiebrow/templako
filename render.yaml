@@ -3,7 +3,15 @@ services:
     name: lako-backend
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    startCommand: python backend/server.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SUPABASE_URL
+        value: https://emsmhgfzmgnpadpremkq.supabase.co
+      - key: SUPABASE_KEY
+        sync: false

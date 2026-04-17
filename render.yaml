@@ -1,17 +1,17 @@
 services:
   - type: web
-    name: lako-backend
-    runtime: python
+    name: lako
+    env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python backend/server.py
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: SMTP_USERNAME
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
+      - key: SECRET_KEY
+        generateValue: true
       - key: SUPABASE_URL
         value: https://emsmhgfzmgnpadpremkq.supabase.co
       - key: SUPABASE_KEY
-        sync: false
+        value: sb_publishable_hBlCZ6Ri3WZci17dWPLzug_dUX8Btzi
+      - key: SMTP_USERNAME
+        value: morillokylebrian@gmail.com
+      - key: SMTP_PASSWORD
+        value: khug erxu dhxa ugut

@@ -20,16 +20,27 @@ CORS(app, origins=["*"])
 
 DB_NAME = os.path.join(os.path.dirname(__file__), 'lako.db')
 
-# Your Gmail SMTP
+# Gmail SMTP (from environment or fallback)
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SMTP_USERNAME = "morillokylebrian@gmail.com"
-SMTP_PASSWORD = "khug erxu dhxa ugut"
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "morillokylebrian@gmail.com")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "khug erxu dhxa ugut")
 
-# Supabase Configuration
-SUPABASE_URL = "https://emsmhgfzmgnpadpremkq.supabase.co"
-SUPABASE_KEY = "sb_publishable_hBlCZ6Ri3WZci17dWPLzug_dUX8Btzi"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# Supabase Configuration (from environment)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+
+# Initialize Supabase client only if credentials are available
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        print(f"⚠️ Warning: Supabase initialization failed: {e}")
+        print("Continuing with SQLite-only database...")
+        supabase = None
+else:
+    print("⚠️ Warning: Supabase credentials not configured. Using SQLite only.")
 
 # ============================================
 # DATABASE (SQLite + Supabase)
@@ -100,12 +111,14 @@ def init_db():
     print("✓ SQLite initialized")
 
 def sync_to_supabase(table, data):
-    """Sync data to Supabase"""
+    """Sync data to Supabase (optional)"""
+    if not supabase:
+        return False
     try:
         supabase.table(table).upsert(data).execute()
         return True
     except Exception as e:
-        print(f"Supabase sync error: {e}")
+        print(f"⚠️ Supabase sync error: {e}")
         return False
 
 init_db()

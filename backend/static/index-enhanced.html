@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#1F2937">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Lako">
+    <title>Lako - Vendor Marketplace PWA</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" type="image/svg+xml" href="/static/icon-192.svg">
+    <link rel="apple-touch-icon" href="/static/icon-192.svg">
+    
+    <!-- Leaflet CSS for OpenStreetMap -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <!-- Heatmap plugin -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-heatmap/1.0.0/leaflet-heatmap.min.css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #1F2937;
+            --primary-light: #374151;
+            --accent: #10B981;
+            --accent-light: #34D399;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+            --text: #1F2937;
+            --text-light: #6B7280;
+            --bg: #FFFFFF;
+            --bg-alt: #F9FAFB;
+            --border: #E5E7EB;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            -webkit-touch-callout: none;
+            overflow: hidden;
+        }
+
+        /* SVG Icon styling */
+        .svg-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* App Layout */
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: max(1rem, env(safe-area-inset-top)) 1rem;
+            background: var(--primary);
+            color: white;
+            box-shadow: var(--shadow-md);
+            z-index: 1000;
+            flex-shrink: 0;
+        }
+
+        .app-header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .app-header-icons {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .icon-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            transition: background 0.2s;
+        }
+
+        .icon-btn:active {
+            background: rgba(255,255,255,0.3);
+        }
+
+        /* Main content area -->
+        .app-content {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+        }
+
+        .screen {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .screen.active {
+            display: flex;
+        }
+
+        /* Map screen -->
+        #map {
+            flex: 1;
+            width: 100%;
+            z-index: 1;
+        }
+
+        .map-controls {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            z-index: 500;
+        }
+
+        .map-control-btn {
+            width: 44px;
+            height: 44px;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow-md);
+            transition: all 0.2s;
+        }
+
+        .map-control-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Traffic legend -->
+        .traffic-legend {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: var(--shadow-md);
+            z-index: 500;
+            max-width: 200px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+
+        .legend-color.free { background: #4ade80; }
+        .legend-color.moderate { background: #facc15; }
+        .legend-color.heavy { background: #f97316; }
+        .legend-color.severe { background: #dc2626; }
+
+        /* Vendor card (on map) -->
+        .vendor-popup {
+            min-width: 200px;
+        }
+
+        .vendor-popup h4 {
+            margin: 0 0 0.5rem 0;
+            color: var(--primary);
+        }
+
+        .vendor-popup p {
+            margin: 0.25rem 0;
+            font-size: 0.9rem;
+            color: var(--text-light);
+        }
+
+        .vendor-rating {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            margin-top: 0.5rem;
+        }
+
+        .star {
+            color: var(--accent);
+        }
+
+        /* Bottom Navigation --> 
+        .app-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg);
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-around;
+            padding-bottom: env(safe-area-inset-bottom);
+            z-index: 1000;
+        }
+
+        .nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem 0;
+            gap: 0.5rem;
+            border: none;
+            background: none;
+            cursor: pointer;
+            color: var(--text-light);
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .nav-item.active {
+            color: var(--accent);
+        }
+
+        .nav-item:active {
+            background: var(--bg-alt);
+        }
+
+        .nav-icon {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* Feed & other screens -->
+        .feed-content, .dashboard-content, .profile-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            padding-bottom: 5rem;
+        }
+
+        .card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 1rem;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            border: none;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:active {
+            background: var(--accent-light);
+            transform: scale(0.98);
+        }
+
+        /* Modal -->
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: flex-end;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg);
+            width: 100%;
+            padding: 1.5rem;
+            border-radius: 1rem 1rem 0 0;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-light);
+        }
+
+        /* OTP Input -->
+        .otp-inputs {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            margin: 1.5rem 0;
+        }
+
+        .otp-input {
+            width: 50px;
+            height: 50px;
+            font-size: 24px;
+            text-align: center;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-weight: 700;
+            transition: border-color 0.2s;
+        }
+
+        .otp-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .otp-input.filled {
+            background: var(--bg-alt);
+        }
+
+        /* Heatmap layer opacity -->
+        .leaflet-tile-container {
+            opacity: 0.9;
+        }
+
+        @media (max-width: 640px) {
+            .traffic-legend {
+                font-size: 0.85rem;
+                padding: 0.75rem;
+            }
+        }
+
+        /* Responsive map controls -->
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <header class="app-header">
+            <h1>
+                <span class="svg-icon" style="width: 30px; height: 30px;">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                </span>
+                Lako
+            </h1>
+            <div class="app-header-icons">
+                <button class="icon-btn" id="search-btn" title="Search">
+                    <span class="svg-icon" style="width: 24px; height: 24px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    </span>
+                </button>
+                <button class="icon-btn" id="menu-btn" title="Menu">
+                    <span class="svg-icon" style="width: 24px; height: 24px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    </span>
+                </button>
+            </div>
+        </header>
+
+        <div class="app-content">
+            <!-- Map Screen -->
+            <div id="screen-map" class="screen active">
+                <div id="map"></div>
+                
+                <div class="map-controls">
+                    <button class="map-control-btn" id="traffic-toggle" title="Toggle Traffic">
+                        <span class="svg-icon" style="width: 20px; height: 20px; color: var(--primary);">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="8" cy="18" r="2"/><path d="M12 6h8M12 12h8M12 18h8"/></svg>
+                        </span>
+                    </button>
+                    <button class="map-control-btn" id="locate-btn" title="My Location">
+                        <span class="svg-icon" style="width: 20px; height: 20px; color: #10b981;">
+                            <svg viewBox="0 0 24 24" fill="#10b981"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4m0-2c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6 2.69-6 6-6zm0 12c-3.31 0-6 2.69-6 6h12c0-3.31-2.69-6-6-6z"/></svg>
+                        </span>
+                    </button>
+                </div>
+
+                <div class="traffic-legend">
+                    <h4 style="margin: 0 0 0.5rem 0;">Traffic Level</h4>
+                    <div class="legend-item">
+                        <div class="legend-color free"></div>
+                        <span>Free Flowing</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color moderate"></div>
+                        <span>Moderate</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color heavy"></div>
+                        <span>Heavy</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color severe"></div>
+                        <span>Severe</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Feed Screen -->
+            <div id="screen-feed" class="screen">
+                <div class="feed-content">
+                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;" onclick="showCreatePost()">
+                        <span class="svg-icon" style="width: 20px; height: 20px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                        </span>
+                        Create Post
+                    </button>
+                    <div id="posts-feed"></div>
+                </div>
+            </div>
+
+            <!-- Dashboard Screen -->
+            <div id="screen-dashboard" class="screen">
+                <div class="dashboard-content">
+                    <div id="dashboard-content"></div>
+                </div>
+            </div>
+
+            <!-- Profile Screen -->
+            <div id="screen-profile" class="screen">
+                <div class="profile-content">
+                    <div id="profile-content"></div>
+                </div>
+            </div>
+
+            <!-- Auth Screen -->
+            <div id="screen-auth" class="screen" style="align-items: center; justify-content: center; padding: 2rem;">
+                <div style="max-width: 300px; text-align: center;">
+                    <h2 style="margin-bottom: 2rem;">Welcome to Lako</h2>
+                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;" onclick="showLoginModal()">Login</button>
+                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;" onclick="showGuestLogin()">Continue as Guest</button>
+                    <button class="btn btn-primary" style="width: 100%;" onclick="showRegisterModal()">Create Account</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Navigation -->
+        <nav class="app-nav">
+            <button class="nav-item active" id="nav-map" onclick="switchScreen('map')">
+                <span class="nav-icon svg-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                </span>
+                <span>Map</span>
+            </button>
+            <button class="nav-item" id="nav-feed" onclick="switchScreen('feed')">
+                <span class="nav-icon svg-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h20v2H2zm0 4h20v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V7z"/></svg>
+                </span>
+                <span>Feed</span>
+            </button>
+            <button class="nav-item" id="nav-dashboard" onclick="switchScreen('dashboard')">
+                <span class="nav-icon svg-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                </span>
+                <span>Dashboard</span>
+            </button>
+            <button class="nav-item" id="nav-profile" onclick="switchScreen('profile')">
+                <span class="nav-icon svg-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                </span>
+                <span>Profile</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal" id="login-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Login</h3>
+                <button class="close-btn" onclick="closeModal('login-modal')">✕</button>
+            </div>
+            <form onsubmit="handleLogin(event)">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Email</label>
+                    <input type="email" id="login-email" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem;" required>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Password</label>
+                    <input type="password" id="login-password" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem;" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- OTP Modal -->
+    <div class="modal" id="otp-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Verify Email</h3>
+            </div>
+            <p style="text-align: center; color: var(--text-light); margin-bottom: 1.5rem;">
+                We've sent a 6-digit code to your email
+            </p>
+            <div class="otp-inputs" id="otp-inputs"></div>
+            <button class="btn btn-primary" style="width: 100%;" onclick="submitOTP()">Verify</button>
+            <p style="text-align: center; font-size: 0.9rem; color: var(--text-light); margin-top: 1rem;">
+                Didn't receive the code? <button type="button" onclick="resendOTP()" style="background: none; border: none; color: var(--accent); cursor: pointer; font-weight: 600;">Resend</button>
+            </p>
+        </div>
+    </div>
+
+    <!-- Post Modal -->
+    <div class="modal" id="post-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Create Post</h3>
+                <button class="close-btn" onclick="closeModal('post-modal')">✕</button>
+            </div>
+            <form onsubmit="handleCreatePost(event)">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">What's on your mind?</label>
+                    <textarea id="post-content" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem; min-height: 100px; resize: vertical; font-family: inherit;" placeholder="Share your thoughts..." required></textarea>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Add Photo (optional)</label>
+                    <input type="file" id="post-image" accept="image/*" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem;">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Post</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Leaflet and Heatmap scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-heatmap/1.0.0/leaflet-heatmap.min.js"></script>
+
+    <script>
+        // ============== APP STATE ==============
+        let currentUser = sessionStorage.getItem('session_token');
+        let currentRole = sessionStorage.getItem('role');
+        let currentScreen = 'map';
+        let map = null;
+        let heatmapLayer = null;
+        let trafficVisible = true;
+
+        // ============== SERVICE WORKER ==============
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/service-worker.js')
+                .then(() => console.log('✓ Service Worker registered'))
+                .catch(err => console.log('Service Worker failed:', err));
+        }
+
+        // ============== INITIALIZATION ==============
+        window.addEventListener('DOMContentLoaded', () => {
+            if (currentUser) {
+                initMap();
+                showScreen('map');
+            } else {
+                showScreen('auth');
+            }
+        });
+
+        // ============== MAP INITIALIZATION ==============
+        function initMap() {
+            const mapContainer = document.getElementById('map');
+            
+            // Initialize Leaflet map
+            map = L.map('map').setView([13.9443, 121.3798], 13);
+            
+            // OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+
+            // Load vendors and traffic
+            loadVendors();
+            addTrafficHeatmap();
+
+            // Map controls
+            document.getElementById('traffic-toggle').addEventListener('click', toggleTraffic);
+            document.getElementById('locate-btn').addEventListener('click', geolocate);
+        }
+
+        function addTrafficHeatmap() {
+            // Create heatmap data (fetched from server in production)
+            const trafficData = [
+                [13.9443, 121.3798, 0.8], // Heavy (red)
+                [13.9500, 121.3850, 0.5], // Moderate (yellow)
+                [13.9400, 121.3750, 0.2], // Light (green)
+                [13.9350, 121.3900, 0.6], // Heavy-moderate (orange)
+                [13.9550, 121.3800, 0.3], // Light-moderate
+            ];
+
+            // Create heatmap with Google Maps style traffic coloring
+            heatmapLayer = L.heatLayer(trafficData, {
+                radius: 40,
+                blur: 25,
+                maxZoom: 17,
+                gradient: {
+                    0.2: '#4ade80',    // Green - Free flowing
+                    0.4: '#facc15',    // Yellow - Moderate
+                    0.6: '#f97316',    // Orange - Heavy
+                    0.8: '#dc2626',    // Red - Severe
+                    1.0: '#991b1b'     // Dark red - Very severe
+                }
+            }).addTo(map);
+        }
+
+        function toggleTraffic() {
+            trafficVisible = !trafficVisible;
+            if (trafficVisible) {
+                map.addLayer(heatmapLayer);
+            } else {
+                map.removeLayer(heatmapLayer);
+            }
+        }
+
+        function geolocate() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    const { latitude, longitude } = position.coords;
+                    map.setView([latitude, longitude], 15);
+                    
+                    L.marker([latitude, longitude], {
+                        icon: L.icon({
+                            iconUrl: 'data:image/svg+xml;utf8,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2310b981"%3E%3Ccircle cx="12" cy="12" r="8"/%3E%3C/svg%3E',
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
+                        })
+                    }).addTo(map).setPopup(L.popup().setContent('You are here'));
+                });
+            }
+        }
+
+        async function loadVendors() {
+            try {
+                const response = await fetch('/api/customer/map/vendors?lat=13.9443&lng=121.3798&radius_km=20', {
+                    headers: { 'X-Session-Token': currentUser }
+                });
+                const data = await response.json();
+                
+                data.vendors.forEach(vendor => {
+                    const popup = `<div class="vendor-popup">
+                        <h4>${vendor.name}</h4>
+                        <p><strong>${vendor.category}</strong></p>
+                        <p>${vendor.address}</p>
+                        <div class="vendor-rating">
+                            <span class="star">⭐</span>
+                            <span>${vendor.rating || 'New'}</span>
+                        </div>
+                        <p style="margin-top: 0.5rem;"><strong>${vendor.distance} km</strong></p>
+                    </div>`;
+                    
+                    L.marker([vendor.latitude, vendor.longitude], {
+                        icon: L.icon({
+                            iconUrl: 'data:image/svg+xml;utf8,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2310b981"%3E%3Cpath d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/%3E%3C/svg%3E',
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 32],
+                            popupAnchor: [0, -32]
+                        })
+                    }).addTo(map).setPopup(L.popup().setContent(popup));
+                });
+            } catch (error) {
+                console.error('Error loading vendors:', error);
+            }
+        }
+
+        // ============== NAVIGATION ==============
+        function switchScreen(screen) {
+            if (!currentUser && screen !== 'auth') {
+                switchScreen('auth');
+                return;
+            }
+
+            currentScreen = screen;
+            showScreen(screen);
+            updateNav();
+        }
+
+        function showScreen(screen) {
+            document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+            const screenEl = document.getElementById(`screen-${screen}`);
+            if (screenEl) {
+                screenEl.classList.add('active');
+                
+                // Initialize map on first view
+                if (screen === 'map' && !map) {
+                    initMap();
+                }
+            }
+        }
+
+        function updateNav() {
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            const navId = document.getElementById(`nav-${currentScreen}`);
+            if (navId) navId.classList.add('active');
+        }
+
+        // ============== AUTH ==============
+        function showLoginModal() {
+            document.getElementById('login-modal').classList.add('active');
+        }
+
+        function showGuestLogin() {
+            fetch('/api/auth/guest', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    sessionStorage.setItem('session_token', data.session_token);
+                    sessionStorage.setItem('role', 'guest');
+                    sessionStorage.setItem('name', data.name);
+                    currentUser = data.session_token;
+                    currentRole = 'guest';
+                    switchScreen('map');
+                });
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await response.json();
+                
+                if (data.requires_verification) {
+                    showOTPModal(email);
+                } else if (data.session_token) {
+                    sessionStorage.setItem('session_token', data.session_token);
+                    sessionStorage.setItem('role', data.role);
+                    sessionStorage.setItem('name', data.name);
+                    currentUser = data.session_token;
+                    currentRole = data.role;
+                    closeModal('login-modal');
+                    switchScreen('map');
+                } else {
+                    alert(data.error || 'Login failed');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // ============== OTP ==============
+        function showOTPModal(email) {
+            sessionStorage.setItem('pending_email', email);
+            document.getElementById('login-modal').classList.remove('active');
+            document.getElementById('otp-modal').classList.add('active');
+            
+            // Create OTP input fields
+            const otpInputs = document.getElementById('otp-inputs');
+            otpInputs.innerHTML = Array.from({ length: 6 }, (_, i) => 
+                `<input type="text" class="otp-input" maxlength="1" inputmode="numeric" data-index="${i}">`
+            ).join('');
+            
+            // Add auto-tab functionality
+            otpInputs.querySelectorAll('.otp-input').forEach((input, i) => {
+                input.addEventListener('input', (e) => {
+                    if (e.target.value && i < 5) {
+                        otpInputs.children[i + 1].focus();
+                    }
+                    e.target.classList.toggle('filled', !!e.target.value);
+                });
+            });
+        }
+
+        function submitOTP() {
+            const otpInputs = Array.from(document.querySelectorAll('#otp-inputs .otp-input'));
+            const otp = otpInputs.map(input => input.value).join('');
+            const email = sessionStorage.getItem('pending_email');
+            
+            if (otp.length !== 6) {
+                alert('Please enter 6-digit code');
+                return;
+            }
+            
+            fetch('/api/auth/verify-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, otp })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.session_token) {
+                    sessionStorage.setItem('session_token', data.session_token);
+                    sessionStorage.setItem('role', data.role);
+                    currentUser = data.session_token;
+                    currentRole = data.role;
+                    closeModal('otp-modal');
+                    switchScreen('map');
+                } else {
+                    alert(data.error || 'Invalid OTP');
+                }
+            });
+        }
+
+        function resendOTP() {
+            alert('Code resent to your email');
+        }
+
+        // ============== POSTS ==============
+        function showCreatePost() {
+            if (!currentUser) {
+                switchScreen('auth');
+                return;
+            }
+            document.getElementById('post-modal').classList.add('active');
+        }
+
+        async function handleCreatePost(e) {
+            e.preventDefault();
+            const content = document.getElementById('post-content').value;
+            const imageFile = document.getElementById('post-image').files[0];
+            
+            const formData = new FormData();
+            formData.append('content', content);
+            if (imageFile) formData.append('image', imageFile);
+            
+            try {
+                const response = await fetch('/api/customer/posts', {
+                    method: 'POST',
+                    headers: { 'X-Session-Token': currentUser },
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.id) {
+                    closeModal('post-modal');
+                    document.getElementById('post-content').value = '';
+                    document.getElementById('post-image').value = '';
+                    alert('Post created!');
+                } else {
+                    alert(data.error || 'Failed to create post');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // ============== MODALS ==============
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        function showRegisterModal() {
+            alert('Registration feature coming soon!');
+        }
+    </script>
+</body>
+</html>

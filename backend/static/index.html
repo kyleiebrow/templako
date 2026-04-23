@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#10B981">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Lako">
+    <title>Lako - Vendor Marketplace</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" type="image/png" href="/static/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #10B981;
+            --primary-light: #34D399;
+            --primary-dark: #059669;
+            --accent: #10B981;
+            --accent-light: #34D399;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+            --success: #10B981;
+            --text: #1F2937;
+            --text-light: #6B7280;
+            --text-muted: #9CA3AF;
+            --bg: #FFFFFF;
+            --bg-alt: #F8FAFC;
+            --bg-glass: rgba(255, 255, 255, 0.25);
+            --bg-glass-dark: rgba(0, 0, 0, 0.1);
+            --border: #E5E7EB;
+            --border-light: #F3F4F6;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
+            --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+            --shadow-xl: 0 20px 25px rgba(0,0,0,0.1);
+            --shadow-glow: 0 0 20px rgba(16, 185, 129, 0.15);
+            --gradient-primary: linear-gradient(135deg, #10B981 0%, #34D399 100%);
+            --gradient-secondary: linear-gradient(135deg, #F8FAFC 0%, #E2E8F0 100%);
+            --gradient-accent: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            --blur: blur(10px);
+            --border-radius: 16px;
+            --border-radius-sm: 8px;
+            --border-radius-lg: 24px;
+        }
+
+        /* Loading Spinner */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+
+        .loading-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .spinner {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .spinner div {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--primary);
+            animation: windows-loading 1.4s ease-in-out infinite both;
+        }
+
+        .spinner div:nth-child(1) { animation-delay: -0.32s; }
+        .spinner div:nth-child(2) { animation-delay: -0.16s; }
+        .spinner div:nth-child(3) { animation-delay: 0s; }
+        .spinner div:nth-child(3) { animation-delay: 0s; }
+
+        @keyframes windows-loading {
+            0%, 80%, 100% {
+                transform: scale(0);
+                opacity: 0.5;
+            }
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background-image: 
+                radial-gradient(circle at 20% 80%, rgba(16, 185, 129, 0.03) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(16, 185, 129, 0.03) 0%, transparent 50%);
+        }
+
+        /* PWA Native-like Bar */
+        .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: max(1rem, env(safe-area-inset-top)) 1rem;
+            background: var(--bg-glass);
+            backdrop-filter: var(--blur);
+            -webkit-backdrop-filter: var(--blur);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text);
+            box-shadow: var(--shadow-lg);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .app-header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .app-header-icons {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .icon-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            transition: background 0.2s;
+        }
+
+        .icon-btn:active {
+            background: rgba(255,255,255,0.3);
+        }
+
+        /* Main Container */
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding-bottom: 80px;
+        }
+
+        /* Bottom Navigation */
+        .app-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-glass);
+            backdrop-filter: var(--blur);
+            -webkit-backdrop-filter: var(--blur);
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            justify-content: space-around;
+            padding-bottom: env(safe-area-inset-bottom);
+            z-index: 1000;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem 0;
+            gap: 0.5rem;
+            border: none;
+            background: none;
+            cursor: pointer;
+            color: var(--text-light);
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .nav-item.active {
+            color: var(--accent);
+        }
+
+        .nav-item:active {
+            background: var(--bg-alt);
+        }
+
+        .nav-icon {
+            font-size: 1.5rem;
+        }
+
+        /* Cards and Components */
+        .card {
+            background: var(--bg-glass);
+            backdrop-filter: var(--blur);
+            -webkit-backdrop-filter: var(--blur);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: var(--border-radius);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-lg);
+            margin: 1rem 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--gradient-primary);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-xl), var(--shadow-glow);
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+
+        .btn {
+            padding: 0.875rem 1.75rem;
+            border-radius: var(--border-radius-sm);
+            border: none;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 600;
+            position: relative;
+            overflow: hidden;
+            text-transform: none;
+            letter-spacing: 0.025em;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+
+        .btn:active::before {
+            width: 300px;
+            height: 300px;
+        }
+
+        .btn-primary {
+            background: var(--gradient-primary);
+            color: white;
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg), var(--shadow-glow);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-secondary {
+            background: var(--bg-glass);
+            backdrop-filter: var(--blur);
+            -webkit-backdrop-filter: var(--blur);
+            color: var(--text);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-alt);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-secondary:active {
+            transform: translateY(0);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-danger:active {
+            background: #DC2626;
+        }
+
+        /* Loading States */
+        .skeleton {
+            animation: skeleton-loading 1s linear infinite alternate;
+            background: var(--border);
+            border-radius: 0.5rem;
+        }
+
+        @keyframes skeleton-loading {
+            0% {
+                background-color: var(--bg-alt);
+            }
+            100% {
+                background-color: var(--border);
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .app-container {
+                padding: 0;
+            }
+
+            .card {
+                margin: 0.5rem 0;
+                border-radius: 0;
+            }
+        }
+
+        /* Safe Areas for notch devices */
+        @supports (padding: max(0px)) {
+            .app-header {
+                padding-top: max(1rem, env(safe-area-inset-top));
+                padding-left: max(1rem, env(safe-area-inset-left));
+                padding-right: max(1rem, env(safe-area-inset-right));
+            }
+
+            .app-nav {
+                padding-left: env(safe-area-inset-left);
+                padding-right: env(safe-area-inset-right);
+            }
+        }
+
+        /* Sections */
+        .section {
+            padding: 1rem;
+        }
+
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        /* Feed Items */
+        .feed-item {
+            border-bottom: 1px solid var(--border);
+            padding: 1rem;
+            margin: 0;
+        }
+
+        .feed-item:last-child {
+            border-bottom: none;
+        }
+
+        .author-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+
+        .engagement {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .engagement-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        .engagement-btn.active {
+            color: var(--accent);
+        }
+
+        /* Forms */
+        .input-group {
+            margin-bottom: 1rem;
+        }
+
+        .label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            font-family: inherit;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        /* Status Badges */
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent);
+        }
+
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        /* Alerts */
+        .alert {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .alert-info {
+            background: rgba(59, 130, 246, 0.1);
+            color: #1e40af;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: #065f46;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .alert-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: #7f1d1d;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: flex-end;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg);
+            width: 100%;
+            padding: 1.5rem;
+            border-radius: 1rem 1rem 0 0;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-light);
+        }
+
+        /* Spinner */
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* AI Assistant */
+        .ai-assistant-btn {
+            position: fixed;
+            bottom: 100px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: var(--shadow-lg);
+            z-index: 1001;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            user-select: none;
+        }
+
+        .ai-assistant-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 15px 30px rgba(16, 185, 129, 0.4);
+        }
+
+        .ai-assistant-btn:active {
+            transform: scale(0.95);
+        }
+
+        .ai-modal {
+            position: fixed;
+            bottom: 90px;
+            right: 20px;
+            width: 350px;
+            max-height: 500px;
+            background: var(--bg);
+            border-radius: 1rem;
+            box-shadow: var(--shadow-lg);
+            z-index: 1002;
+            display: none;
+            flex-direction: column;
+            border: 1px solid var(--border);
+        }
+
+        .ai-modal.show {
+            display: flex;
+        }
+
+        .ai-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: move;
+        }
+
+        .ai-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: var(--text);
+        }
+
+        .ai-close {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            cursor: pointer;
+            color: var(--text-light);
+        }
+
+        .ai-chat {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            max-height: 350px;
+        }
+
+        .ai-message {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            max-width: 80%;
+        }
+
+        .ai-message.user {
+            background: var(--primary);
+            color: white;
+            margin-left: auto;
+        }
+
+        .ai-message.assistant {
+            background: var(--bg-alt);
+            color: var(--text);
+        }
+
+        .ai-input-area {
+            padding: 1rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .ai-input {
+            flex: 1;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            font-family: inherit;
+            font-size: 0.9rem;
+        }
+
+        .ai-send {
+            padding: 0.75rem 1rem;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .ai-send:hover {
+            background: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <header class="app-header">
+            <h1>🛍️ Lako</h1>
+            <div class="app-header-icons">
+                <button class="icon-btn" id="search-btn" title="Search">🔍</button>
+                <button class="icon-btn" id="menu-btn" title="Menu">☰</button>
+            </div>
+        </header>
+
+        <main class="app-container">
+            <div id="screen-vendors" style="display: none;">
+                <div class="section">
+                    <h2 class="section-title">Nearby Vendors</h2>
+                    <div id="vendors-list"></div>
+                </div>
+            </div>
+
+            <div id="screen-feed" style="display: none;">
+                <div class="section">
+                    <h2 class="section-title">Social Feed</h2>
+                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;" onclick="showCreatePost()">📸 Create Post</button>
+                    <div id="posts-feed"></div>
+                </div>
+            </div>
+
+            <div id="screen-dashboard" style="display: none;">
+                <div class="section">
+                    <h2 class="section-title">Dashboard</h2>
+                    <div id="dashboard-content"></div>
+                </div>
+            </div>
+
+            <div id="screen-profile" style="display: none;">
+                <div class="section">
+                    <h2 class="section-title">Profile</h2>
+                    <div id="profile-content"></div>
+                </div>
+            </div>
+
+            <div id="screen-auth" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh; padding: 2rem;">
+                <h2 style="margin-bottom: 2rem; text-align: center;">Welcome to Lako</h2>
+                <button class="btn btn-primary" onclick="showLoginModal()" style="width: 100%; margin-bottom: 1rem;">Login</button>
+                <button class="btn btn-secondary" onclick="showGuestLogin()" style="width: 100%; margin-bottom: 1rem;">Continue as Guest</button>
+                <button class="btn btn-secondary" onclick="showRegisterModal()" style="width: 100%;">Create Account</button>
+            </div>
+        </main>
+
+        <nav class="app-nav">
+            <button class="nav-item active" id="nav-vendors" onclick="switchScreen('vendors')">
+                <span class="nav-icon">🗺️</span>
+                <span>Vendors</span>
+            </button>
+            <button class="nav-item" id="nav-feed" onclick="switchScreen('feed')">
+                <span class="nav-icon">📰</span>
+                <span>Feed</span>
+            </button>
+            <button class="nav-item" id="nav-dashboard" onclick="switchScreen('dashboard')">
+                <span class="nav-icon">📊</span>
+                <span>Dashboard</span>
+            </button>
+            <button class="nav-item" id="nav-profile" onclick="switchScreen('profile')">
+                <span class="nav-icon">👤</span>
+                <span>Profile</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner">
+            <div></div>
+            <div></div>
+            <div></div>
+        </div>
+    </div>
+
+    <!-- AI Assistant -->
+    <button class="ai-assistant-btn" id="ai-assistant-btn" title="AI Assistant">🤖</button>
+    <div class="ai-modal" id="ai-modal">
+        <div class="ai-header">
+            <h3>AI Assistant</h3>
+            <button class="ai-close" onclick="closeAIModal()">✕</button>
+        </div>
+        <div class="ai-chat" id="ai-chat"></div>
+        <div class="ai-input-area">
+            <input type="text" class="ai-input" id="ai-input" placeholder="Ask me anything...">
+            <button class="ai-send" onclick="sendAIMessage()">Send</button>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="login-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Login</h3>
+                <button class="close-btn" onclick="closeModal('login-modal')">✕</button>
+            </div>
+            <form onsubmit="handleLogin(event)">
+                <div class="input-group">
+                    <label class="label">Email</label>
+                    <input type="email" id="login-email" required>
+                </div>
+                <div class="input-group">
+                    <label class="label">Password</label>
+                    <input type="password" id="login-password" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="post-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Create Post</h3>
+                <button class="close-btn" onclick="closeModal('post-modal')">✕</button>
+            </div>
+            <form onsubmit="handleCreatePost(event)">
+                <div class="input-group">
+                    <label class="label">What's on your mind?</label>
+                    <textarea id="post-content" placeholder="Share your thoughts..." required></textarea>
+                </div>
+                <div class="input-group">
+                    <label class="label">Add Photo (optional)</label>
+                    <input type="file" id="post-image" accept="image/*">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Post</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/service-worker.js')
+                .then(reg => console.log('✓ Service Worker registered'))
+                .catch(err => console.log('Service Worker registration failed:', err));
+        }
+
+        // State Management
+        let currentUser = localStorage.getItem('session_token');
+        let currentRole = localStorage.getItem('role');
+        let currentScreen = 'auth';
+
+        // Initialize
+        window.addEventListener('DOMContentLoaded', () => {
+            if (currentUser) {
+                switchScreen('vendors');
+            }
+            updateNav();
+        });
+
+        function switchScreen(screen) {
+            if (!currentUser) {
+                currentScreen = 'auth';
+            } else {
+                currentScreen = screen;
+            }
+            
+            // Hide all screens
+            document.querySelectorAll('[id^="screen-"]').forEach(el => el.style.display = 'none');
+            
+            if (currentUser) {
+                document.getElementById('screen-auth').style.display = 'none';
+                document.getElementById(`screen-${screen}`).style.display = 'block';
+                
+                // Load data for screen
+                if (screen === 'vendors') loadVendors();
+                else if (screen === 'feed') loadFeed();
+                else if (screen === 'dashboard') loadDashboard();
+                else if (screen === 'profile') loadProfile();
+                
+                updateNav();
+            } else {
+                document.getElementById('screen-auth').style.display = 'flex';
+            }
+        }
+
+        function updateNav() {
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            const navId = `nav-${currentScreen}`;
+            const navItem = document.getElementById(navId);
+            if (navItem) navItem.classList.add('active');
+        }
+
+        async function loadVendors() {
+            showLoading();
+            const list = document.getElementById('vendors-list');
+            list.innerHTML = '<div class="skeleton" style="height: 100px;"></div>';
+            
+            try {
+                const response = await fetch('/api/customer/map/vendors?lat=13.9443&lng=121.3798&radius_km=20');
+                const data = await response.json();
+                
+                list.innerHTML = data.vendors.map(v => `
+                    <div class="card">
+                        <h3>${v.name}</h3>
+                        <p style="color: var(--text-light);">${v.category} • ${v.distance} km away</p>
+                        <p>${v.address}</p>
+                        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                            <span class="badge badge-success">⭐ ${v.rating || 'New'}</span>
+                            <span class="badge badge-warning">${v.phone}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                list.innerHTML = '<div class="alert alert-error">Error loading vendors</div>';
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function loadFeed() {
+            const feed = document.getElementById('posts-feed');
+            feed.innerHTML = '<div class="skeleton" style="height: 100px;"></div>';
+            
+            try {
+                const response = await fetch('/api/customer/feed', {
+                    headers: { 'X-Session-Token': currentUser }
+                });
+                const data = await response.json();
+                
+                feed.innerHTML = data.posts.map(post => `
+                    <div class="feed-item">
+                        <div class="author-info">
+                            <div class="avatar">${post.author.charAt(0)}</div>
+                            <strong>${post.author}</strong>
+                        </div>
+                        ${post.image_url ? `<img src="${post.image_url}" style="width: 100%; margin: 0.5rem 0; border-radius: 0.5rem; max-height: 400px; object-fit: cover;">` : ''}
+                        <p>${post.content}</p>
+                        <div class="engagement">
+                            <button class="engagement-btn" onclick="likePost('${post.id}')">
+                                ❤️ <span>${post.likes}</span>
+                            </button>
+                            <button class="engagement-btn">
+                                💬 <span>${post.comments || 0}</span>
+                            </button>
+                            <button class="engagement-btn">
+                                ↗️ Share
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                feed.innerHTML = '<div class="alert alert-error">Error loading feed</div>';
+            }
+        }
+
+        async function loadDashboard() {
+            const content = document.getElementById('dashboard-content');
+            
+            if (currentRole === 'admin') {
+                try {
+                    const response = await fetch('/api/admin/analytics');
+                    const data = await response.json();
+                    
+                    content.innerHTML = `
+                        <div class="card">
+                            <h3 style="margin-bottom: 1rem;">Platform Overview</h3>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent);">${data.total_users}</div>
+                                    <div style="color: var(--text-light);">Total Users</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent);">${data.active_vendors}</div>
+                                    <div style="color: var(--text-light);">Active Vendors</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent);">${data.total_products}</div>
+                                    <div style="color: var(--text-light);">Total Products</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent);">${data.unique_visitors}</div>
+                                    <div style="color: var(--text-light);">Unique Visitors</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } catch (error) {
+                    content.innerHTML = '<div class="alert alert-error">Error loading analytics</div>';
+                }
+            } else if (currentRole === 'vendor') {
+                try {
+                    const response = await fetch('/api/vendor/analytics', {
+                        headers: { 'X-Session-Token': currentUser }
+                    });
+                    const data = await response.json();
+                    
+                    content.innerHTML = `
+                        <div class="card">
+                            <h3 style="margin-bottom: 1rem;">Your Analytics</h3>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">${data.profile_views}</div>
+                                    <div style="color: var(--text-light);">Profile Views</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">⭐ ${data.avg_rating}</div>
+                                    <div style="color: var(--text-light);">Avg Rating</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">${data.total_reviews}</div>
+                                    <div style="color: var(--text-light);">Reviews</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">${data.total_shortlists}</div>
+                                    <div style="color: var(--text-light);">Shortlists</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } catch (error) {
+                    content.innerHTML = '<div class="alert alert-error">Error loading analytics</div>';
+                }
+            } else if (currentRole === 'customer') {
+                try {
+                    const response = await fetch('/api/customer/analytics', {
+                        headers: { 'X-Session-Token': currentUser }
+                    });
+                    const data = await response.json();
+                    
+                    content.innerHTML = `
+                        <div class="card">
+                            <h3 style="margin-bottom: 1rem;">Your Activity</h3>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">${data.vendors_viewed}</div>
+                                    <div style="color: var(--text-light);">Vendors Viewed</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">${data.posts_created}</div>
+                                    <div style="color: var(--text-light);">Posts Created</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">${data.likes_received}</div>
+                                    <div style="color: var(--text-light);">Likes Received</div>
+                                </div>
+                                <div style="padding: 1rem; background: var(--bg-alt); border-radius: 0.5rem;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">${data.total_shortlists}</div>
+                                    <div style="color: var(--text-light);">Shortlists</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } catch (error) {
+                    content.innerHTML = '<div class="alert alert-error">Error loading analytics</div>';
+                }
+            }
+        }
+
+        function loadProfile() {
+            const content = document.getElementById('profile-content');
+            content.innerHTML = `
+                <div class="card">
+                    <p><strong>Name:</strong> ${localStorage.getItem('name') || 'User'}</p>
+                    <p><strong>Role:</strong> ${currentRole}</p>
+                    <button class="btn btn-danger" style="width: 100%; margin-top: 1rem;" onclick="logout()">Logout</button>
+                </div>
+            `;
+        }
+
+        function showLoginModal() {
+            document.getElementById('login-modal').classList.add('active');
+        }
+
+        function showCreatePost() {
+            if (!currentUser) {
+                switchScreen('auth');
+                return;
+            }
+            document.getElementById('post-modal').classList.add('active');
+        }
+
+        function showGuestLogin() {
+            // Create guest session
+            fetch('/api/auth/guest', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    localStorage.setItem('session_token', data.session_token);
+                    localStorage.setItem('role', 'guest');
+                    localStorage.setItem('name', data.name);
+                    currentUser = data.session_token;
+                    currentRole = 'guest';
+                    switchScreen('vendors');
+                });
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await response.json();
+                
+                if (data.session_token) {
+                    localStorage.setItem('session_token', data.session_token);
+                    localStorage.setItem('role', data.role);
+                    localStorage.setItem('name', data.name);
+                    currentUser = data.session_token;
+                    currentRole = data.role;
+                    closeModal('login-modal');
+                    switchScreen('vendors');
+                } else {
+                    alert(data.error || 'Login failed');
+                }
+            } catch (error) {
+                alert('Login error: ' + error.message);
+            }
+        }
+
+        async function handleCreatePost(e) {
+            e.preventDefault();
+            const content = document.getElementById('post-content').value;
+            const imageFile = document.getElementById('post-image').files[0];
+            
+            const formData = new FormData();
+            formData.append('content', content);
+            if (imageFile) formData.append('image', imageFile);
+            
+            try {
+                const response = await fetch('/api/customer/posts', {
+                    method: 'POST',
+                    headers: { 'X-Session-Token': currentUser },
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.id) {
+                    closeModal('post-modal');
+                    loadFeed();
+                    alert('Post created!');
+                } else {
+                    alert(data.error || 'Failed to create post');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function likePost(postId) {
+            try {
+                const response = await fetch(`/api/customer/posts/${postId}/like`, {
+                    method: 'POST',
+                    headers: { 'X-Session-Token': currentUser }
+                });
+                const data = await response.json();
+                if (data.liked !== undefined) {
+                    loadFeed();
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        function logout() {
+            localStorage.removeItem('session_token');
+            localStorage.removeItem('role');
+            localStorage.removeItem('name');
+            currentUser = null;
+            currentRole = null;
+            switchScreen('auth');
+        }
+
+        function showRegisterModal() {
+            alert('Registration feature coming soon!');
+        }
+
+        // Loading functions
+        function showLoading() {
+            document.getElementById('loading-overlay').classList.add('show');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').classList.remove('show');
+        }
+
+        // AI Assistant functions
+        let isDragging = false;
+        let dragOffset = { x: 0, y: 0 };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const aiBtn = document.getElementById('ai-assistant-btn');
+            const aiModal = document.getElementById('ai-modal');
+            const aiHeader = aiModal.querySelector('.ai-header');
+            const aiInput = document.getElementById('ai-input');
+
+            // Drag functionality
+            aiHeader.addEventListener('mousedown', startDrag);
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', endDrag);
+
+            // AI button click
+            aiBtn.addEventListener('click', toggleAIModal);
+
+            // Enter key for input
+            aiInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    sendAIMessage();
+                }
+            });
+
+            function startDrag(e) {
+                isDragging = true;
+                const rect = aiModal.getBoundingClientRect();
+                dragOffset.x = e.clientX - rect.left;
+                dragOffset.y = e.clientY - rect.top;
+                aiModal.style.cursor = 'grabbing';
+            }
+
+            function drag(e) {
+                if (!isDragging) return;
+                const x = e.clientX - dragOffset.x;
+                const y = e.clientY - dragOffset.y;
+                aiModal.style.left = x + 'px';
+                aiModal.style.top = y + 'px';
+                aiModal.style.right = 'auto';
+                aiModal.style.bottom = 'auto';
+            }
+
+            function endDrag() {
+                isDragging = false;
+                aiModal.style.cursor = 'move';
+            }
+        });
+
+        function toggleAIModal() {
+            const modal = document.getElementById('ai-modal');
+            modal.classList.toggle('show');
+        }
+
+        function closeAIModal() {
+            document.getElementById('ai-modal').classList.remove('show');
+        }
+
+        async function sendAIMessage() {
+            const input = document.getElementById('ai-input');
+            const chat = document.getElementById('ai-chat');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            // Add user message
+            chat.innerHTML += `<div class="ai-message user">${message}</div>`;
+            input.value = '';
+            
+            // Show typing indicator
+            chat.innerHTML += `<div class="ai-message assistant" id="typing">AI is thinking...</div>`;
+            chat.scrollTop = chat.scrollHeight;
+            
+            try {
+                const response = await fetch('/api/ai/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                const data = await response.json();
+                
+                // Remove typing indicator
+                document.getElementById('typing').remove();
+                
+                // Add AI response
+                chat.innerHTML += `<div class="ai-message assistant">${data.response}</div>`;
+                chat.scrollTop = chat.scrollHeight;
+            } catch (error) {
+                document.getElementById('typing').remove();
+                chat.innerHTML += `<div class="ai-message assistant">Sorry, I encountered an error. Please try again.</div>`;
+                chat.scrollTop = chat.scrollHeight;
+            }
+        }
+    </script>
+</body>
+</html>

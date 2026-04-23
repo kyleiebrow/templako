@@ -3,20 +3,45 @@ services:
     name: lako
     env: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      pip install gunicorn
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --worker-class sync
     envVars:
       - key: SECRET_KEY
         generateValue: true
       - key: SUPABASE_URL
-        value: https://emsmhgfzmgnpadpremkq.supabase.co
-      - key: SUPABASE_SERVICE_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...  # GET THIS FROM SUPABASE
-      - key: SMTP_USERNAME
-        value: morillokylebrian@gmail.com
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
       - key: SMTP_PASSWORD
-        value: khug erxu dhxa ugut
-      - key: DATABASE_PATH
-        value: /opt/render/project/src/lako.db
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: APP_NAME
+        value: Lako
+      - key: BASE_URL
+        sync: false
+      - key: DEBUG
+        value: "False"
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: "3.11.0"
+      - key: RENDER
+        value: "true"
+
+  - type: cron
+    name: lako-health-check
+    schedule: "*/5 * * * *"
+    rootDir: backend
+    startCommand: curl -I https://lako.onrender.com/health || exit 0

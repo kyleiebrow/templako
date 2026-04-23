@@ -6,16 +6,18 @@ services:
     buildCommand: |
       pip install --upgrade pip
       pip install -r requirements.txt
-    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
     envVars:
       - key: SECRET_KEY
         generateValue: true
       - key: SUPABASE_URL
-        value: https://emsmhgfzmgnpadpremkq.supabase.co
+        sync: false
       - key: SUPABASE_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVtc21oZ2Z6bWducGFkcHJlbWtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0NTIxNjgsImV4cCI6MjA5MjAyODE2OH0.h_f7FY60hNyYtVtvftUDXMuR2ybmZgiMZcnIyyeRkFE
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
       - key: BASE_URL
-        value: https://lako.onrender.com
+        sync: false
       - key: APP_NAME
         value: Lako
       - key: DEBUG

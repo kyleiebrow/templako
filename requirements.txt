@@ -1,39 +1,13 @@
-# Web Framework
 Flask==2.3.3
 flask-cors==4.0.0
 gunicorn==21.2.0
-
-# Database
 supabase==2.0.2
-
-# Security
 bcrypt==4.0.1
-
-# Image Processing
 Pillow==10.0.1
-
-# Email (built-in - no pip install needed)
-# smtplib, email are part of Python standard library
-
-# SMS Notifications
-twilio==8.10.0
-
-# Environment & Utilities
 python-dotenv==1.0.0
 requests==2.31.0
+twilio==8.10.0
 email-validator==2.1.0
 python-multipart==0.0.6
+httpx==0.25.0
 python-dateutil==2.8.2
-python-json-logger==2.0.7
-urllib3==2.0.7
-certifi==2023.7.22
-
-# Async Support (for Supabase)
-aiohttp==3.8.6
-aiosignal==1.3.1
-frozenlist==1.4.0
-async-timeout==4.0.3
-
-# WebSocket (for Supabase Realtime)
-websockets==12.0
-websocket-client==1.6.4

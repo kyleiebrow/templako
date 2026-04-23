@@ -5,8 +5,6 @@ gunicorn==21.2.0
 
 # Database
 supabase==2.0.2
-postgrest==0.14.0
-realtime==1.0.0
 storage3==0.7.0
 
 # Security

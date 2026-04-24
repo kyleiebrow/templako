@@ -200,13 +200,15 @@ def get_products_by_vendor(vendor_id):
     except:
         return []
 
-def create_product(vendor_id, name, description, category, price, images=None):
+def create_product(vendor_id, name, description, category, price, images=None, stock=0 ):
     product_id = str(uuid.uuid4())
+    
     processed_images = []
     if images:
         for img in images:
             try:
-                if ',' in img: img = img.split(',')[1]
+                if ',' in img:
+                    img = img.split(',')[1]
                 image_bytes = base64.b64decode(img)
                 pil_img = Image.open(io.BytesIO(image_bytes))
                 if pil_img.mode in ('RGBA', 'P'):
@@ -218,33 +220,29 @@ def create_product(vendor_id, name, description, category, price, images=None):
                 pil_img.save(buffer, format='JPEG', quality=85)
                 processed = f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode()}"
                 processed_images.append({'original': processed, 'thumbnail': processed})
-            except:
-                pass
+            except Exception as e:
+                print(f"Image processing error: {e}")
+    
     product_data = {
-        'id': product_id, 'vendor_id': vendor_id, 'name': name, 'description': description,
-        'category': category, 'price': float(price), 'stock': 0,
-        'images': processed_images, 'is_active': True, 'created_at': utc_now(), 'updated_at': utc_now()
+        'id': product_id,
+        'vendor_id': vendor_id,
+        'name': name,
+        'description': description,
+        'category': category,
+        'price': float(price),
+        'stock': int(stock),
+        'images': processed_images,
+        'is_active': True,
+        'created_at': utc_now(),
+        'updated_at': utc_now()
     }
+    
     try:
         supabase.table('products').insert(product_data).execute()
         return product_id
-    except:
+    except Exception as e:
+        print(f"create_product error: {e}")
         return None
-
-def update_product(product_id, data):
-    try:
-        data['updated_at'] = utc_now()
-        supabase.table('products').update(data).eq('id', product_id).execute()
-        return True
-    except:
-        return False
-
-def delete_product(product_id):
-    try:
-        supabase.table('products').update({'is_active': False}).eq('id', product_id).execute()
-        return True
-    except:
-        return False
 
 def create_post(user_id, user_role, content, images=None):
     post_id = str(uuid.uuid4())
@@ -1721,18 +1719,42 @@ async function showProducts() {
 let currentProductId = null, currentImages = [];
 
 function openAddProductModal() {
-    currentProductId = null; currentImages = [];
+    currentProductId = null;
+    currentImages = [];
     document.getElementById('modalTitle').innerText = 'Add Product';
     document.getElementById('modalBody').innerHTML = `
         <input type="text" id="prodName" class="input" placeholder="Product name *">
         <textarea id="prodDesc" class="input" placeholder="Description" rows="3"></textarea>
         <select id="prodCategory" class="input">${CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select>
-        <div class="flex gap-2"><input type="number" id="prodPrice" class="input" placeholder="Price (₱) *" step="0.01"><input type="number" id="prodStock" class="input" placeholder="Stock"></div>
-        <input type="file" id="prodImages" class="input" multiple accept="image/*" onchange="previewImages(this)">
-        <div id="imagePreview" class="product-images-container"></div>
-        <div class="flex gap-2 mt-4"><button class="btn" onclick="saveProduct()"><i class="fas fa-save"></i> Save Product</button><button class="btn-outline" onclick="closeProductModal()">Cancel</button></div>
+        <div class="flex gap-2">
+            <input type="number" id="prodPrice" class="input" placeholder="Price (₱) *" step="0.01">
+            <input type="number" id="prodStock" class="input" placeholder="Stock">
+        </div>
+        <div class="flex items-center gap-2" style="margin: 12px 0;">
+            <button type="button" class="btn-outline btn-sm" id="choosePhotosBtn">📷 Choose Photos</button>
+            <span class="text-secondary" id="fileCount">No files chosen</span>
+        </div>
+        <input type="file" id="prodImages" multiple accept="image/*" style="position: absolute; left: -9999px; top: -9999px;">
+        <div id="imagePreview" class="product-images-container" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;"></div>
+        <div class="flex gap-2 mt-4">
+            <button class="btn" onclick="saveProduct()">Save Product</button>
+            <button class="btn-outline" onclick="closeProductModal()">Cancel</button>
+        </div>
     `;
     document.getElementById('productModal').classList.add('show');
+    
+    // Attach file picker event after modal is shown (Android fix)
+    setTimeout(() => {
+        const chooseBtn = document.getElementById('choosePhotosBtn');
+        const fileInput = document.getElementById('prodImages');
+        if (chooseBtn && fileInput) {
+            chooseBtn.onclick = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                fileInput.click();
+            };
+        }
+    }, 100);
 }
 
 async function openEditProductModal(productId) {
@@ -1759,10 +1781,23 @@ async function openEditProductModal(productId) {
 
 function previewImages(input) {
     const previewDiv = document.getElementById('imagePreview');
-    for (let file of input.files) {
+    const fileCount = document.getElementById('fileCount');
+    previewDiv.innerHTML = '';
+    
+    if (fileCount) {
+        fileCount.innerText = `${input.files.length} file(s) selected`;
+    }
+    
+    for (let i = 0; i < input.files.length; i++) {
+        const file = input.files[i];
         const reader = new FileReader();
         reader.onload = function(e) {
-            previewDiv.innerHTML += `<div class="image-preview"><img src="${e.target.result}"><div class="remove-img" onclick="this.parentElement.remove()">✖</div></div>`;
+            previewDiv.innerHTML += `
+                <div class="image-preview" data-index="${i}">
+                    <img src="${e.target.result}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px;">
+                    <div class="remove-img" onclick="this.parentElement.remove()">✖</div>
+                </div>
+            `;
         };
         reader.readAsDataURL(file);
     }
@@ -1773,25 +1808,48 @@ function removeImage(index) { currentImages.splice(index, 1); document.getElemen
 async function saveProduct() {
     const name = document.getElementById('prodName').value;
     const price = parseFloat(document.getElementById('prodPrice').value);
-    if (!name || !price) { alert('Name and price are required!'); return; }
     
-    const newImages = [];
-    const fileInput = document.getElementById('prodImages');
-    for (let file of fileInput.files) {
-        const reader = new FileReader();
-        const imgData = await new Promise(resolve => { reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
-        newImages.push(imgData);
+    if (!name || !price) {
+        alert('Name and price are required!');
+        return;
     }
-    const allImages = [...currentImages.map(i => i.original), ...newImages];
     
-    const productData = { name, description: document.getElementById('prodDesc').value, category: document.getElementById('prodCategory').value, price, stock: parseInt(document.getElementById('prodStock').value) || 0, images: allImages };
+    // Collect images as base64
+    const images = [];
+    const fileInput = document.getElementById('prodImages');
+    
+    for (let i = 0; i < fileInput.files.length; i++) {
+        const file = fileInput.files[i];
+        const reader = new FileReader();
+        const imgData = await new Promise((resolve) => {
+            reader.onload = (e) => resolve(e.target.result);
+            reader.readAsDataURL(file);
+        });
+        images.push(imgData);
+    }
+    
+    const productData = {
+        name: name,
+        description: document.getElementById('prodDesc').value,
+        category: document.getElementById('prodCategory').value,
+        price: price,
+        stock: parseInt(document.getElementById('prodStock').value) || 0,
+        images: images
+    };
+    
     const endpoint = currentProductId ? '/api/vendor/product/update' : '/api/vendor/product/create';
     const body = currentProductId ? { product_id: currentProductId, ...productData } : productData;
+    
     const res = await api(endpoint, { method: 'POST', body: JSON.stringify(body) });
-    if (res && res.success) { alert(currentProductId ? 'Product updated!' : 'Product created!'); closeProductModal(); showProducts(); }
-    else alert('Failed to save product');
+    
+    if (res && res.success) {
+        alert(currentProductId ? 'Product updated!' : 'Product created!');
+        closeProductModal();
+        showProducts();
+    } else {
+        alert('Failed to save product');
+    }
 }
-
 async function deleteProduct(productId) {
     if (confirm('Delete this product permanently?')) {
         const res = await api('/api/vendor/product/delete', { method: 'POST', body: JSON.stringify({ product_id: productId }) });
@@ -2241,11 +2299,22 @@ def create_product_route():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session or session['role'] != 'vendor':
         return jsonify({'error': 'Unauthorized'}), 401
+    
     vendor = get_vendor_by_user_id(session['user_id'])
     if not vendor:
         return jsonify({'error': 'Vendor not found'}), 404
+    
     data = request.json
-    product_id = create_product(vendor['id'], data.get('name'), data.get('description'), data.get('category'), data.get('price'), data.get('stock', 0), data.get('images', []))
+    # Remove stock parameter - only pass 6 arguments
+    product_id = create_product(
+        vendor['id'], 
+        data.get('name'), 
+        data.get('description'), 
+        data.get('category'), 
+        data.get('price'), 
+        data.get('images', [])
+    )
+    
     return jsonify({'success': True, 'product_id': product_id}) if product_id else jsonify({'error': 'Failed'}), 500
 
 @app.route('/api/vendor/product/update', methods=['POST'])

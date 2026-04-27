@@ -273,6 +273,63 @@ notifications = NotificationService()
 # AUTO OTP FUNCTIONS
 # ============================================
 # ============================================
+# SESSION HELPERS (Persistent Login)
+# ============================================
+
+def create_session(user_id, role):
+    session_token = str(uuid.uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    
+    session_data = {
+        'id': str(uuid.uuid4()),
+        'session_token': session_token,
+        'user_id': user_id,
+        'role': role,
+        'created_at': utc_now(),
+        'expires_at': expires_at.isoformat(),
+        'last_activity': utc_now()
+    }
+    
+    try:
+        supabase.table('user_sessions').insert(session_data).execute()
+        return session_token
+    except Exception as e:
+        print(f"Create session error: {e}")
+        return None
+
+def get_session(session_token):
+    if not session_token:
+        return None
+    try:
+        result = supabase.table('user_sessions').select('*').eq('session_token', session_token).execute()
+        if result.data:
+            session = result.data[0]
+            expiry = datetime.fromisoformat(session['expires_at'].replace('Z', '+00:00'))
+            if expiry < datetime.now(timezone.utc):
+                supabase.table('user_sessions').delete().eq('session_token', session_token).execute()
+                return None
+            supabase.table('user_sessions').update({'last_activity': utc_now()}).eq('session_token', session_token).execute()
+            return session
+        return None
+    except:
+        return None
+
+def delete_session(session_token):
+    try:
+        supabase.table('user_sessions').delete().eq('session_token', session_token).execute()
+        return True
+    except:
+        return False
+
+def require_session():
+    session_token = request.headers.get('X-Session-Token')
+    if not session_token:
+        return None
+    session = get_session(session_token)
+    if not session:
+        return None
+    return {'user_id': session['user_id'], 'role': session['role']}
+# ============================================
 # HELPER FUNCTIONS FOR PHOTO STORAGE
 # ============================================
 
@@ -446,13 +503,14 @@ def get_vendors_nearby(lat, lng, radius_km=50):
         return []
 
 def get_products_by_vendor(vendor_id):
+    """Get active products by vendor (exclude deleted)"""
     try:
         result = supabase.table('products').select('*').eq('vendor_id', vendor_id).eq('is_active', True).execute()
         return result.data or []
     except:
         return []
 
-def create_product(vendor_id, name, description, category, price, images=None, stock=0 ):
+def create_product(vendor_id, name, description, category, price, images=None, stock=0):
     product_id = str(uuid.uuid4())
     
     processed_images = []
@@ -482,7 +540,7 @@ def create_product(vendor_id, name, description, category, price, images=None, s
         'description': description,
         'category': category,
         'price': float(price),
-        'stock': int(stock),
+        'stock': int(stock),  # Default to 0, hidden from UI
         'images': processed_images,
         'is_active': True,
         'created_at': utc_now(),
@@ -495,6 +553,75 @@ def create_product(vendor_id, name, description, category, price, images=None, s
     except Exception as e:
         print(f"create_product error: {e}")
         return None
+    
+# ============================================
+# COMPLETE PRODUCT UPDATE AND DELETE FUNCTIONS
+# ============================================
+
+def update_product(product_id, product_data):
+    """Update existing product"""
+    try:
+        # Process new images if provided
+        processed_images = None
+        if product_data.get('images'):
+            processed_images = []
+            for img in product_data['images']:
+                try:
+                    if ',' in img:
+                        img = img.split(',')[1]
+                    image_bytes = base64.b64decode(img)
+                    pil_img = Image.open(io.BytesIO(image_bytes))
+                    if pil_img.mode in ('RGBA', 'P'):
+                        rgb_img = Image.new('RGB', pil_img.size, (255, 255, 255))
+                        rgb_img.paste(pil_img, mask=pil_img.split()[-1] if pil_img.mode == 'RGBA' else None)
+                        pil_img = rgb_img
+                    pil_img.thumbnail((400, 400))
+                    buffer = io.BytesIO()
+                    pil_img.save(buffer, format='JPEG', quality=85)
+                    processed = f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode()}"
+                    processed_images.append({'original': processed, 'thumbnail': processed})
+                except Exception as e:
+                    print(f"Image processing error: {e}")
+        
+        # Build update data
+        update_data = {
+            'name': product_data.get('name'),
+            'description': product_data.get('description'),
+            'category': product_data.get('category'),
+            'price': float(product_data.get('price')),
+            'stock': int(product_data.get('stock', 0)),
+            'updated_at': utc_now()
+        }
+        
+        if processed_images:
+            update_data['images'] = processed_images
+        
+        # Remove None values
+        update_data = {k: v for k, v in update_data.items() if v is not None}
+        
+        supabase.table('products').update(update_data).eq('id', product_id).execute()
+        return True
+    except Exception as e:
+        print(f"Update product error: {e}")
+        return False
+
+def delete_product(product_id):
+    """Soft delete product (set is_active to False)"""
+    try:
+        supabase.table('products').update({'is_active': False, 'updated_at': utc_now()}).eq('id', product_id).execute()
+        return True
+    except Exception as e:
+        print(f"Delete product error: {e}")
+        return False
+
+def hard_delete_product(product_id):
+    """Permanently delete product from database"""
+    try:
+        supabase.table('products').delete().eq('id', product_id).execute()
+        return True
+    except Exception as e:
+        print(f"Hard delete product error: {e}")
+        return False   
 
 def create_post(user_id, user_role, content, images=None):
     post_id = str(uuid.uuid4())
@@ -678,6 +805,103 @@ def get_all_vendors_admin():
     except:
         return []
 
+# ============================================
+# MISSING DB HELPER FUNCTIONS
+# ============================================
+
+def get_user_by_phone(phone):
+    try:
+        result = supabase.table('users').select('*').eq('phone', phone).execute()
+        return result.data[0] if result.data else None
+    except:
+        return None
+
+def verify_password(email, password):
+    user = get_user_by_email(email)
+    if user and bcrypt.checkpw(password.encode(), user['password'].encode()):
+        return user
+    return None
+
+def get_vendor_by_user_id(user_id):
+    try:
+        result = supabase.table('vendors').select('*').eq('user_id', user_id).execute()
+        return result.data[0] if result.data else None
+    except:
+        return None
+
+def get_all_vendors():
+    try:
+        result = supabase.table('vendors').select('*').eq('is_active', True).execute()
+        return result.data or []
+    except:
+        return []
+
+def update_vendor_hours(vendor_id, hours):
+    try:
+        supabase.table('vendors').update({'operating_hours': hours}).eq('id', vendor_id).execute()
+        return True
+    except:
+        return False
+
+def update_vendor_location(vendor_id, lat, lng):
+    try:
+        supabase.table('vendors').update({'latitude': lat, 'longitude': lng}).eq('id', vendor_id).execute()
+        return True
+    except:
+        return False
+
+def get_admin_stats():
+    stats = {'total_users': 0, 'total_vendors': 0, 'total_products': 0, 'total_reviews': 0, 'total_posts': 0}
+    try:
+        stats['total_users'] = supabase.table('users').select('*', count='exact').execute().count or 0
+        stats['total_vendors'] = supabase.table('vendors').select('*', count='exact').execute().count or 0
+        stats['total_products'] = supabase.table('products').select('*', count='exact').eq('is_active', True).execute().count or 0
+        stats['total_reviews'] = supabase.table('reviews').select('*', count='exact').execute().count or 0
+        stats['total_posts'] = supabase.table('posts').select('*', count='exact').execute().count or 0
+    except:
+        pass
+    return stats
+
+def get_all_users_admin():
+    try:
+        return supabase.table('users').select('*').order('created_at', desc=True).execute().data or []
+    except:
+        return []
+
+def suspend_user(user_id):
+    try:
+        supabase.table('users').update({'is_suspended': True}).eq('id', user_id).execute()
+        return True
+    except:
+        return False
+
+def unsuspend_user(user_id):
+    try:
+        supabase.table('users').update({'is_suspended': False}).eq('id', user_id).execute()
+        return True
+    except:
+        return False
+
+def toggle_vendor_active(vendor_id, is_active):
+    try:
+        supabase.table('vendors').update({'is_active': is_active}).eq('id', vendor_id).execute()
+        return True
+    except:
+        return False
+
+def get_all_vendors_admin():
+    try:
+        return supabase.table('vendors').select('*').order('created_at', desc=True).execute().data or []
+    except:
+        return []
+
+def hard_delete_product(product_id):
+    """Permanently delete product from database"""
+    try:
+        supabase.table('products').delete().eq('id', product_id).execute()
+        return True
+    except:
+        return False
 # ============================================
 # FLASK APP
 # ============================================
@@ -1125,7 +1349,7 @@ button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
 .upload-area i{font-size:32px;color:#2d8c3c;margin-bottom:8px;display:block}
 .file-info{display:flex;align-items:center;gap:12px;padding:12px;background:#f8faf8;border-radius:12px;margin-top:12px}
 .thumbnail{width:50px;height:50px;border-radius:12px;object-fit:cover}
-.map-container{height:200px;background:#e8ece8;border-radius:16px;margin:16px 0;border:1px solid #e0e8e0}
+.map-container{height:280px;background:#e8ece8;border-radius:20px;margin:16px 0;border:1px solid #e0e8e0;position:relative;overflow:hidden}
 .location-badge{background:#f8faf8;border-radius:12px;padding:12px;margin:12px 0;display:flex;align-items:center;gap:12px;border:1px solid #e0e8e0}
 .location-badge i{color:#2d8c3c;font-size:18px}
 .location-text{flex:1;font-size:13px}
@@ -1136,10 +1360,6 @@ button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
 .otp-input:focus{outline:none;border-color:#2d8c3c}
 .checkbox-row{display:flex;align-items:center;gap:12px;margin:20px 0}
 .checkbox-row input{width:18px;height:18px;accent-color:#2d8c3c}
-.delivery-options{background:#f8faf8;border-radius:16px;padding:16px;margin:20px 0}
-.radio-group{display:flex;gap:20px;justify-content:center}
-.radio-group label{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:#1a2e1a}
-.radio-group input[type="radio"]{width:18px;height:18px;accent-color:#2d8c3c;margin:0}
 .toast{position:fixed;bottom:24px;left:20px;right:20px;background:#1a2e1a;color:white;padding:14px;border-radius:50px;text-align:center;z-index:1000}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid white;border-top-color:transparent;border-radius:50%;animation:spin 0.5s linear infinite;margin-right:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -1150,11 +1370,12 @@ button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
 .strength-fill{height:100%;width:0%}
 .strength-text{font-size:11px;margin-top:4px}
 .footer{text-align:center;padding:20px;border-top:1px solid #e8ece8;margin-top:20px;color:#8ba88b;font-size:11px}
-.contact-method{display:flex;gap:16px;margin:24px 0;justify-content:center}
-.method-btn{flex:1;padding:12px;background:#f8faf8;border:2px solid #e0e8e0;border-radius:16px;cursor:pointer;text-align:center;transition:all 0.2s}
+.contact-method{display:flex;gap:16px;margin:20px 0;justify-content:center}
+.method-btn{flex:1;padding:16px;background:#f8faf8;border:2px solid #e0e8e0;border-radius:16px;cursor:pointer;text-align:center;transition:all 0.2s}
 .method-btn.active{border-color:#2d8c3c;background:#e8f5e9}
-.method-btn i{font-size:24px;display:block;margin-bottom:8px;color:#2d8c3c}
-.method-btn span{font-size:12px;font-weight:500;color:#1a2e1a}
+.method-btn i{font-size:28px;display:block;margin-bottom:8px;color:#2d8c3c}
+.method-btn span{font-size:13px;font-weight:600;color:#1a2e1a}
+.method-btn small{font-size:11px;color:#8ba88b;display:block}
 </style>
 
 <div class="header">
@@ -1174,9 +1395,8 @@ localStorage.setItem('user_role', userRole);
 
 let step='login';
 let q=0;
+let contactMethod = 'phone'; // 'phone' or 'email'
 let regData={
-    // Contact method: 'email' or 'phone'
-    contactMethod: 'phone',  // Default to phone for easier registration
     email: '',
     phone: '',
     autoGeneratedEmail: '',
@@ -1198,6 +1418,7 @@ let regData={
 };
 let otpInterval = null;
 let map = null;
+let currentMarker = null;
 
 const CATEGORIES = ["Coffee","Pancit","Tusok Tusok","Contemporary Street food","Bread and Pastry","Lomi","Beverage","Sarisari Store","Karendirya","Traditional Desserts","Contemporary Desserts","Squidball","Siomai","Siopao","Taho","Balut and other poultry","Corn","Fruit shakes","Fruit Juice"];
 
@@ -1216,30 +1437,38 @@ function showLoading(show, message){
 
 function handleBack(){
     if(step==='register'&&q>0){q--;render();}
-    else if(step==='register'){step='login';render();}
+    else if(step==='register'){step='login';contactMethod='phone';render();}
     else if(step==='otp'){step='register';q=0;render();}
     else{window.location.href='/';}
 }
 
 function getQuestions(){
-    if(userRole==='customer'){
-        let qs = ['Your name', 'Phone number', 'Profile photo', 'Create password', 'Confirm password', 'Your preferences'];
-        return qs;
+    let qs = [];
+    if(userRole === 'customer'){
+        qs = ['Contact method', 'Your name', 'Phone number', 'Email address', 'Profile photo', 'Create password', 'Confirm password', 'Your preferences'];
     } else {
-        let qs = ['Business name', 'Your name', 'Phone number', 'Business category', 'Business location', 'Profile photo', 'Business logo', 'Create password', 'Confirm password'];
-        return qs;
+        qs = ['Contact method', 'Business name', 'Your name', 'Phone number', 'Email address', 'Business category', 'Business location', 'Profile photo', 'Business logo', 'Create password', 'Confirm password'];
     }
+    // Filter out based on contact method
+    if(contactMethod === 'phone'){
+        qs = qs.filter(q => q !== 'Email address');
+    } else {
+        qs = qs.filter(q => q !== 'Phone number');
+    }
+    return qs;
 }
 
 let questions = getQuestions();
 
 function getStepMsg(currentQuestion){
     let stepMessages = {
+        'Contact method': 'How would you like to receive verification?',
         'Phone number': 'We will send a verification code to this number',
+        'Email address': 'We will send a verification code to this email',
         'Your name': 'Tell us what to call you',
         'Business name': 'What is the name of your business?',
         'Business category': 'Select the category that best describes your business',
-        'Business location': 'Pin your exact location so customers can find you',
+        'Business location': 'Pin your exact location on the map so customers can find you',
         'Profile photo': 'Add a photo so customers can recognize you (optional)',
         'Business logo': 'Upload your business logo (optional)',
         'Create password': 'Create a secure password for your account',
@@ -1250,10 +1479,7 @@ function getStepMsg(currentQuestion){
 }
 
 function generateAutoEmail(name, role){
-    // Generate a clean slug from the name
-    let slug = name.toLowerCase()
-        .replace(/[^a-z0-9]/g, '')
-        .substring(0, 20);
+    let slug = name.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
     if(role === 'vendor'){
         return `${slug}@lako.vendor`;
     } else {
@@ -1261,22 +1487,126 @@ function generateAutoEmail(name, role){
     }
 }
 
-function render(){
-    let c=document.getElementById('content');
-    if(!c)return;
-    
-    if(step==='login'){
-        c.innerHTML='<div class="card"><h2><i class="fas fa-sign-in-alt"></i> Welcome back</h2><div class="subtitle">Sign in to discover amazing street food near you</div><div class="input-group"><input type="text" id="loginIdentifier" placeholder="Email or Phone number"></div><div class="input-group"><input type="password" id="loginPassword" placeholder="Password"><span class="toggle-pwd" onclick="togglePwd(\'loginPassword\')"><i class="fas fa-eye"></i></span></div><button onclick="handleLogin()"><i class="fas fa-sign-in-alt"></i> Sign in</button><button class="secondary" onclick="resetReg()"><i class="fas fa-user-plus"></i> Create new account</button></div>';
+function initLocationMap(){
+    if(typeof L === 'undefined'){
+        setTimeout(initLocationMap, 100);
+        return;
     }
-    else if(step==='register'){
+    if(map) map.remove();
+    
+    map = L.map('locationMap').setView([14.5995, 120.9842], 15);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+    }).addTo(map);
+    
+    // Add click handler to pin location
+    map.on('click', function(e){
+        pinLocation(e.latlng.lat, e.latlng.lng);
+    });
+    
+    // Try to get user's current location
+    if(navigator.geolocation){
+        navigator.geolocation.getCurrentPosition(
+            function(position){
+                let lat = position.coords.latitude;
+                let lng = position.coords.longitude;
+                map.setView([lat, lng], 16);
+                pinLocation(lat, lng);
+                showToast('📍 Location detected! Tap anywhere to adjust');
+            },
+            function(error){
+                console.log('Geolocation error:', error);
+                showToast('📍 Tap on the map to pin your business location');
+            },
+            {enableHighAccuracy: true, timeout: 10000}
+        );
+    } else {
+        showToast('📍 Tap on the map to pin your business location');
+    }
+}
+
+function pinLocation(lat, lng){
+    // Remove existing marker
+    if(currentMarker){
+        map.removeLayer(currentMarker);
+    }
+    
+    // Add new marker
+    currentMarker = L.marker([lat, lng], {draggable: true}).addTo(map);
+    currentMarker.on('dragend', function(e){
+        let pos = e.target.getLatLng();
+        pinLocation(pos.lat, pos.lng);
+    });
+    
+    // Update regData
+    regData.location.lat = lat;
+    regData.location.lng = lng;
+    regData.locationConfirmed = false;
+    
+    // Reverse geocode to get address
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
+        .then(res => res.json())
+        .then(data => {
+            let address = data.display_name || `${lat}, ${lng}`;
+            regData.location.address = address;
+            document.getElementById('locationText').innerHTML = address.split(',').slice(0,4).join(',');
+            document.getElementById('confirmLocBtn').disabled = false;
+            document.getElementById('confirmLocBtn').innerHTML = '<i class="fas fa-check"></i> Confirm Location';
+        })
+        .catch(() => {
+            regData.location.address = `${lat}, ${lng}`;
+            document.getElementById('locationText').innerHTML = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+            document.getElementById('confirmLocBtn').disabled = false;
+        });
+}
+
+function confirmLocation(){
+    if(!regData.location.lat || !regData.location.lng){
+        showToast('Please pin your location on the map first');
+        return;
+    }
+    regData.locationConfirmed = true;
+    document.getElementById('confirmLocBtn').innerHTML = '<i class="fas fa-check-circle"></i> Location Confirmed ✓';
+    document.getElementById('confirmLocBtn').disabled = true;
+    showToast('Location confirmed!');
+    setTimeout(() => { q++; render(); }, 500);
+}
+
+function render(){
+    let c = document.getElementById('content');
+    if(!c) return;
+    
+    if(step === 'login'){
+        c.innerHTML = '<div class="card"><h2><i class="fas fa-sign-in-alt"></i> Welcome back</h2><div class="subtitle">Sign in to discover amazing street food near you</div><div class="input-group"><input type="text" id="loginIdentifier" placeholder="Email or Phone number"></div><div class="input-group"><input type="password" id="loginPassword" placeholder="Password"><span class="toggle-pwd" onclick="togglePwd(\'loginPassword\')"><i class="fas fa-eye"></i></span></div><button onclick="handleLogin()"><i class="fas fa-sign-in-alt"></i> Sign in</button><button class="secondary" onclick="resetReg()"><i class="fas fa-user-plus"></i> Create new account</button></div>';
+    }
+    else if(step === 'register'){
         let current = questions[q];
-        let isLast = (q === questions.length-1);
+        let isLast = (q === questions.length - 1);
         let stepMsg = getStepMsg(current);
         let html = '<div class="step-bars">'+questions.map(function(_,i){return '<div class="bar '+(i===q?'active':(i<q?'completed':''))+'"></div>';}).join('')+'</div><div class="card"><h2><i class="fas fa-user-plus"></i> '+current+'</h2><div class="subtitle">'+stepMsg+'</div>';
         
-        if(current === 'Phone number'){
-            html += '<div class="input-group"><input type="tel" id="ans" placeholder="9123456789" maxlength="10" value="'+(regData.phone?regData.phone.replace('+63',''):'')+'"></div>';
-            html += '<div class="subtitle" style="font-size:12px;color:#8ba88b;margin-top:8px"><i class="fas fa-info-circle"></i> We will send a 6-digit code to verify your number</div>';
+        if(current === 'Contact method'){
+            html += `
+            <div class="contact-method">
+                <div class="method-btn ${contactMethod === 'phone' ? 'active' : ''}" onclick="setContactMethod('phone')">
+                    <i class="fas fa-phone-alt"></i>
+                    <span>Phone Only</span>
+                    <small>Verification via SMS</small>
+                </div>
+                <div class="method-btn ${contactMethod === 'email' ? 'active' : ''}" onclick="setContactMethod('email')">
+                    <i class="fas fa-envelope"></i>
+                    <span>Email Only</span>
+                    <small>Verification via Email</small>
+                </div>
+            </div>`;
+        }
+        else if(current === 'Phone number'){
+            html += '<div class="input-group"><input type="tel" id="ans" placeholder="9123456789" maxlength="10" value="'+(regData.phone || '')+'"></div>';
+            html += '<div class="subtitle" style="font-size:12px;color:#8ba88b;margin-top:8px"><i class="fas fa-info-circle"></i> We will send a 6-digit code via SMS</div>';
+        }
+        else if(current === 'Email address'){
+            html += '<div class="input-group"><input type="email" id="ans" placeholder="you@example.com" value="'+(regData.email || '')+'"></div>';
+            html += '<div class="subtitle" style="font-size:12px;color:#8ba88b;margin-top:8px"><i class="fas fa-info-circle"></i> We will send a 6-digit code via email</div>';
         }
         else if(current === 'Your name'){
             html += '<div class="input-group"><input type="text" id="ans" placeholder="How should we call you?" value="'+(regData.full_name||'')+'"></div>';
@@ -1285,18 +1615,20 @@ function render(){
             html += '<div class="input-group"><input type="text" id="ans" placeholder="Your business name" value="'+(regData.business_name||'')+'"></div>';
         }
         else if(current === 'Business category'){
-            html += '<div class="category-grid">'+CATEGORIES.map(function(c){return '<div class="category-chip '+(regData.category===c?'selected':'')+'" onclick="regData.category=\''+c+'\';render()">'+c+'</div>';}).join('')+'</div>';
+            html += '<div class="category-grid">'+CATEGORIES.map(function(c){return '<div class="category-chip '+(regData.category===c?'selected':'')+'" onclick="selectCategory(\''+c+'\')">'+c+'</div>';}).join('')+'</div>';
         }
         else if(current === 'Business location'){
-            html += '<div class="map-container" id="locationMap"></div><div class="location-badge"><i class="fas fa-location-dot"></i><div class="location-text" id="locationText">Detecting your location...</div><button class="refresh-loc" onclick="initMap()"><i class="fas fa-sync-alt"></i></button></div><button class="confirm-loc" id="confirmLocBtn" onclick="confirmLocation()" disabled><i class="fas fa-check"></i> Confirm location</button>';
-            setTimeout(function(){initMap();},100);
+            html += '<div class="map-container" id="locationMap"></div>';
+            html += '<div class="location-badge"><i class="fas fa-location-dot"></i><div class="location-text" id="locationText">Tap on the map to pin your location</div><button class="refresh-loc" onclick="centerOnUser()"><i class="fas fa-crosshairs"></i></button></div>';
+            html += '<button class="confirm-loc" id="confirmLocBtn" onclick="confirmLocation()" disabled><i class="fas fa-map-pin"></i> Confirm Location</button>';
+            setTimeout(initLocationMap, 100);
         }
         else if(current === 'Profile photo'){
             html += '<div class="upload-area" onclick="document.getElementById(\'photoFile\').click()"><i class="fas fa-camera"></i><div>Tap to upload your profile photo</div><div style="font-size:11px">JPG, PNG (max 5MB)</div></div><input type="file" id="photoFile" style="display:none" accept="image/*" onchange="handlePhotoUpload(this,\'photo\')"><div id="photoPreview"></div><div class="skip-link" style="text-align:center;margin-top:12px"><a href="#" onclick="skipPhoto(\'photo\')" style="color:#8ba88b;text-decoration:none;font-size:13px"><i class="fas fa-forward"></i> Skip for now</a></div>';
             if(regData.profilePhoto){
                 setTimeout(function(){
-                    let preview=document.getElementById('photoPreview');
-                    if(preview)preview.innerHTML='<div class="file-info"><img class="thumbnail" src="'+regData.profilePhoto+'"><span>'+regData.profilePhotoName+'</span><button onclick="removePhoto(\'photo\')"><i class="fas fa-times"></i></button></div>';
+                    let preview = document.getElementById('photoPreview');
+                    if(preview) preview.innerHTML = '<div class="file-info"><img class="thumbnail" src="'+regData.profilePhoto+'"><span>'+regData.profilePhotoName+'</span><button onclick="removePhoto(\'photo\')"><i class="fas fa-times"></i></button></div>';
                 },10);
             }
         }
@@ -1304,8 +1636,8 @@ function render(){
             html += '<div class="upload-area" onclick="document.getElementById(\'logoFile\').click()"><i class="fas fa-image"></i><div>Tap to upload your business logo</div><div style="font-size:11px">JPG, PNG (max 5MB)</div></div><input type="file" id="logoFile" style="display:none" accept="image/*" onchange="handlePhotoUpload(this,\'logo\')"><div id="logoPreview"></div><div class="skip-link" style="text-align:center;margin-top:12px"><a href="#" onclick="skipPhoto(\'logo\')" style="color:#8ba88b;text-decoration:none;font-size:13px"><i class="fas fa-forward"></i> Skip for now</a></div>';
             if(regData.logo){
                 setTimeout(function(){
-                    let preview=document.getElementById('logoPreview');
-                    if(preview)preview.innerHTML='<div class="file-info"><img class="thumbnail" src="'+regData.logo+'"><span>'+regData.logoName+'</span><button onclick="removePhoto(\'logo\')"><i class="fas fa-times"></i></button></div>';
+                    let preview = document.getElementById('logoPreview');
+                    if(preview) preview.innerHTML = '<div class="file-info"><img class="thumbnail" src="'+regData.logo+'"><span>'+regData.logoName+'</span><button onclick="removePhoto(\'logo\')"><i class="fas fa-times"></i></button></div>';
                 },10);
             }
         }
@@ -1335,6 +1667,12 @@ function render(){
         html += '<div class="flex">'+(q>0?'<button class="secondary" onclick="prev()"><i class="fas fa-arrow-left"></i> Back</button>':'')+'<button onclick="next(\''+current+'\')">'+(isLast?'<i class="fas fa-check"></i> Create account':'<i class="fas fa-arrow-right"></i> Continue')+'</button></div></div>';
         c.innerHTML = html;
         
+        if(current === 'Your name' && regData.full_name && !regData.autoGeneratedEmail){
+            regData.autoGeneratedEmail = generateAutoEmail(regData.full_name, userRole);
+        }
+        if(current === 'Business name' && regData.business_name){
+            regData.autoGeneratedEmail = generateAutoEmail(regData.business_name, 'vendor');
+        }
         if(current === 'Create password' && regData.password){
             setTimeout(function(){
                 let pwd = document.getElementById('pwdInput');
@@ -1348,9 +1686,23 @@ function render(){
         if(current === 'Your preferences'){ updateRange(); updateDist(); }
     }
     else if(step === 'otp'){
-        c.innerHTML = '<div class="card"><h2><i class="fas fa-phone-alt"></i> Verify your number</h2><div class="subtitle">We sent a 6-digit verification code to +63' + regData.phone + '. Please enter it below to complete your registration.</div><div class="otp-box">'+Array(6).fill().map(function(_,i){return '<input type="text" maxlength="1" class="otp-input" oninput="moveNext(this,'+i+')">';}).join('')+'</div><button onclick="verifyOTP()"><i class="fas fa-check"></i> Verify account</button><button class="secondary" id="resendBtn" onclick="resendOTP()"><i class="fas fa-redo"></i> Resend code</button></div>';
+        let contactInfo = contactMethod === 'phone' ? regData.phone : regData.email;
+        let displayInfo = contactMethod === 'phone' ? '+63' + regData.phone : regData.email;
+        c.innerHTML = '<div class="card"><h2><i class="fas '+(contactMethod === 'phone' ? 'fa-phone-alt' : 'fa-envelope')+'"></i> Verify your account</h2><div class="subtitle">We sent a 6-digit verification code to '+displayInfo+'.</div><div class="otp-box">'+Array(6).fill().map(function(_,i){return '<input type="text" maxlength="1" class="otp-input" oninput="moveNext(this,'+i+')">';}).join('')+'</div><button onclick="verifyOTP()"><i class="fas fa-check"></i> Verify account</button><button class="secondary" id="resendBtn" onclick="resendOTP()"><i class="fas fa-redo"></i> Resend code</button></div>';
         startAutoOTP();
     }
+}
+
+function setContactMethod(method){
+    contactMethod = method;
+    questions = getQuestions();
+    q = 0;
+    render();
+}
+
+function selectCategory(cat){
+    regData.category = cat;
+    render();
 }
 
 function togglePref(cat){
@@ -1377,6 +1729,20 @@ function updateDist(){
     if(d) d.innerText = v+'km';
 }
 
+function centerOnUser(){
+    if(navigator.geolocation){
+        navigator.geolocation.getCurrentPosition(
+            function(pos){
+                pinLocation(pos.coords.latitude, pos.coords.longitude);
+                showToast('📍 Location updated');
+            },
+            function(){
+                showToast('Could not get your location. Tap on the map to pin manually.');
+            }
+        );
+    }
+}
+
 function prev(){ if(q > 0){ q--; render(); } }
 
 function next(qName){
@@ -1385,6 +1751,10 @@ function next(qName){
     if(qName === 'Phone number'){
         if(!val || val.length !== 10){ showToast('Please enter a valid 10-digit phone number'); return; }
         regData.phone = val;
+    }
+    else if(qName === 'Email address'){
+        if(!val || !val.includes('@')){ showToast('Please enter a valid email address'); return; }
+        regData.email = val;
     }
     else if(qName === 'Create password'){
         let pwdVal = document.getElementById('pwdInput')?.value;
@@ -1404,30 +1774,26 @@ function next(qName){
     else if(qName === 'Your name'){
         if(!val || val.trim() === ''){ showToast('Please enter your name'); return; }
         regData.full_name = val.trim();
-        // Generate auto email from name
         regData.autoGeneratedEmail = generateAutoEmail(regData.full_name, userRole);
     }
     else if(qName === 'Business name'){
         if(!val || val.trim() === ''){ showToast('Please enter your business name'); return; }
         regData.business_name = val.trim();
-        // Generate auto email from business name
         regData.autoGeneratedEmail = generateAutoEmail(regData.business_name, 'vendor');
     }
     else if(qName === 'Business category'){
         if(!regData.category){ showToast('Please select a business category'); return; }
     }
     else if(qName === 'Business location'){
-        if(!regData.locationConfirmed){ showToast('Please confirm your business location'); return; }
+        if(!regData.locationConfirmed){ showToast('Please confirm your business location on the map'); return; }
     }
     else if(qName === 'Profile photo'){
         if(!regData.profilePhoto && !regData.skippedPhoto){ 
-            // Photo is optional, continue anyway
             regData.skippedPhoto = true;
         }
     }
     else if(qName === 'Business logo'){
         if(!regData.logo && !regData.skippedLogo){
-            // Logo is optional, continue anyway
             regData.skippedLogo = true;
         }
     }
@@ -1513,65 +1879,46 @@ function removePhoto(type){
     }
 }
 
-function initMap(){
-    if(typeof L !== 'undefined' && document.getElementById('locationMap') && !map){
-        map = L.map('locationMap').setView([14.5995,120.9842],15);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
-        if(navigator.geolocation){
-            navigator.geolocation.getCurrentPosition(function(p){
-                if(map){
-                    map.setView([p.coords.latitude,p.coords.longitude],16);
-                    L.circle([p.coords.latitude,p.coords.longitude],{radius:50,color:'#2d8c3c',fillColor:'#2d8c3c',fillOpacity:0.2}).addTo(map);
-                    L.marker([p.coords.latitude,p.coords.longitude]).addTo(map);
-                    regData.location.lat = p.coords.latitude;
-                    regData.location.lng = p.coords.longitude;
-                    document.getElementById('confirmLocBtn').disabled = false;
-                    fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+p.coords.latitude+'&lon='+p.coords.longitude+'&zoom=18')
-                        .then(res=>res.json())
-                        .then(data=>{
-                            let addr = data.display_name;
-                            regData.location.address = addr;
-                            document.getElementById('locationText').innerHTML = addr.split(',').slice(0,3).join(',') || addr;
-                        });
-                }
-            });
-        }
-    }
-}
-
-function confirmLocation(){
-    regData.locationConfirmed = true;
-    document.getElementById('confirmLocBtn').innerHTML = '<i class="fas fa-check"></i> Location Confirmed';
-    document.getElementById('confirmLocBtn').disabled = true;
-    showToast('Location confirmed!');
-    setTimeout(function(){ q++; render(); },500);
-}
-
 async function register(){
     showLoading(true, 'Creating your account...');
     
     let endpoint = userRole === 'customer' ? '/api/auth/register/customer' : '/api/auth/register/vendor';
     
-    let body = userRole === 'customer' ? {
-        phone: regData.phone,
-        email: regData.autoGeneratedEmail,  // Auto-generated email
-        password: regData.password,
-        full_name: regData.full_name,
-        profile_photo: regData.profilePhoto || null,
-        preferences: regData.preferences
-    } : {
-        phone: regData.phone,
-        email: regData.autoGeneratedEmail,  // Auto-generated email
-        password: regData.password,
-        business_name: regData.business_name,
-        user_name: regData.full_name,
-        business_category: regData.category,
-        address: regData.location.address || 'Business location',
-        latitude: regData.location.lat || 14.5995,
-        longitude: regData.location.lng || 120.9842,
-        profile_photo: regData.profilePhoto || null,
-        logo: regData.logo || null
-    };
+    let body;
+    if(userRole === 'customer'){
+        body = {
+            full_name: regData.full_name,
+            password: regData.password,
+            preferences: regData.preferences,
+            profile_photo: regData.profilePhoto || null
+        };
+        if(contactMethod === 'phone'){
+            body.phone = regData.phone;
+            body.email = regData.autoGeneratedEmail;
+        } else {
+            body.email = regData.email;
+            body.phone = null;
+        }
+    } else {
+        body = {
+            business_name: regData.business_name,
+            user_name: regData.full_name,
+            password: regData.password,
+            business_category: regData.category,
+            address: regData.location.address,
+            latitude: regData.location.lat,
+            longitude: regData.location.lng,
+            profile_photo: regData.profilePhoto || null,
+            logo: regData.logo || null
+        };
+        if(contactMethod === 'phone'){
+            body.phone = regData.phone;
+            body.email = regData.autoGeneratedEmail;
+        } else {
+            body.email = regData.email;
+            body.phone = null;
+        }
+    }
     
     let res = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     let data = await res.json();
@@ -1605,11 +1952,11 @@ function checkPasswordStrength(){
     if(/[0-9]/.test(pwd)) strength++;
     if(/[^a-zA-Z0-9]/.test(pwd)) strength++;
     
-    let percent = 0, color = '', text = '', valid = false;
-    if(strength <= 2){ percent = 25; color = '#e53935'; text = 'Weak'; valid = false; }
-    else if(strength <= 3){ percent = 50; color = '#fb8c00'; text = 'Fair'; valid = false; }
-    else if(strength <= 4){ percent = 75; color = '#1e88e5'; text = 'Good'; valid = true; }
-    else{ percent = 100; color = '#2d8c3c'; text = 'Strong'; valid = true; }
+    let percent = 0, color = '', text = '';
+    if(strength <= 2){ percent = 25; color = '#e53935'; text = 'Weak'; }
+    else if(strength <= 3){ percent = 50; color = '#fb8c00'; text = 'Fair'; }
+    else if(strength <= 4){ percent = 75; color = '#1e88e5'; text = 'Good'; }
+    else{ percent = 100; color = '#2d8c3c'; text = 'Strong'; }
     
     let fill = document.getElementById('strengthFill');
     let textEl = document.getElementById('strengthText');
@@ -1627,7 +1974,6 @@ function checkPasswordStrength(){
             matchMsg.style.color = '#e53935';
         }
     }
-    return valid;
 }
 
 function checkConfirmMatch(){
@@ -1653,7 +1999,6 @@ async function handleLogin(){
     if(!identifier || !password){ showToast('Please enter email/phone and password'); return; }
     showLoading(true, 'Signing in...');
     
-    // Check if identifier is phone (10 digits) or email
     let isPhone = /^\d{10}$/.test(identifier);
     let body = isPhone ? { phone: '+63'+identifier, password: password } : { email: identifier, password: password };
     
@@ -1674,7 +2019,8 @@ function getOTP(){ return Array.from(document.querySelectorAll('.otp-input')).ma
 
 function startAutoOTP(){
     otpInterval = setInterval(async function(){
-        let res = await fetch('/api/auth/check-otp?phone=+63'+regData.phone);
+        let url = contactMethod === 'phone' ? '/api/auth/check-otp?phone=+63'+regData.phone : '/api/auth/check-otp?email='+encodeURIComponent(regData.email);
+        let res = await fetch(url);
         let data = await res.json();
         if(data.found){
             clearInterval(otpInterval);
@@ -1689,7 +2035,8 @@ function startAutoOTP(){
 async function verifyOTP(){
     let otp = getOTP(); if(otp.length !== 6){ showToast('Enter 6-digit code'); return; }
     showLoading(true, 'Verifying...');
-    let res = await fetch('/api/auth/verify-otp', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({phone: '+63'+regData.phone, otp: otp})});
+    let body = contactMethod === 'phone' ? {phone: '+63'+regData.phone, otp: otp} : {email: regData.email, otp: otp};
+    let res = await fetch('/api/auth/verify-otp', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     let data = await res.json();
     showLoading(false);
     if(res.ok){
@@ -1702,15 +2049,16 @@ async function verifyOTP(){
 }
 
 async function resendOTP(){
-    await fetch('/api/auth/resend-otp', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({phone: '+63'+regData.phone})});
+    let body = contactMethod === 'phone' ? {phone: '+63'+regData.phone} : {email: regData.email};
+    await fetch('/api/auth/resend-otp', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     showToast('New code sent');
 }
 
 function resetReg(){
     step = 'register';
     q = 0;
+    contactMethod = 'phone';
     regData = {
-        contactMethod: 'phone',
         email: '',
         phone: '',
         autoGeneratedEmail: '',
@@ -1736,84 +2084,94 @@ function resetReg(){
 
 let fa = document.createElement('link'); fa.rel='stylesheet'; fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'; document.head.appendChild(fa);
 let leaflet = document.createElement('link'); leaflet.rel='stylesheet'; leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(leaflet);
-let leafletScript = document.createElement('script'); leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; leafletScript.onload=function(){ if(step==='register' && questions[q]==='Business location') setTimeout(initMap,100); }; document.head.appendChild(leafletScript);
+let leafletScript = document.createElement('script'); leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; leafletScript.onload=function(){ if(step==='register' && questions[q]==='Business location') setTimeout(initLocationMap,100); }; document.head.appendChild(leafletScript);
 
 render();
 </script>
 ''')
-
 # ============================================
 # GUEST PAGE (Updated with modern GUI)
 # ============================================
-
 GUEST = render_page("Guest Mode", '''
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+body{background:#f8faf8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 .app-bar{background:white;padding:16px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100}
 .back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
 .app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
 .menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
-.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px)}
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto}
-.nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer}
+.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:80px}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05);z-index:99}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer;transition:all 0.2s}
 .nav-item i{font-size:22px}
 .nav-item.active{color:#2d8c3c}
-.card{background:white;border-radius:24px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
-.search-bar{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:44px;padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.nav-item span{font-size:11px;font-weight:500}
+.card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03);border:0.5px solid rgba(0,0,0,0.03);cursor:pointer;transition:all 0.2s}
+.card:active{transform:scale(0.98)}
+.search-bar{background:white;border:1px solid #e0e8e0;border-radius:30px;padding:10px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.search-bar i{color:#8ba88b;font-size:16px}
 .search-bar input{flex:1;border:none;background:transparent;font-size:15px;outline:none}
-.filter-chips{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;margin-bottom:20px}
-.chip{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:40px;padding:8px 16px;font-size:13px;white-space:nowrap;cursor:pointer}
-.chip.active{background:#2d8c3c;color:white;border-color:#2d8c3c}
-.map-wrapper{background:#e8ece8;border-radius:24px;overflow:hidden;margin-bottom:20px;position:relative}
-.map-container{height:320px;position:relative}
-#map{height:100%;width:100%}
-.map-controls{position:absolute;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px}
-.map-control-btn{width:44px;height:44px;background:white;border:none;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);cursor:pointer;color:#2d8c3c;font-size:18px}
-.btn{width:100%;padding:14px;background:#2d8c3c;color:white;border:none;border-radius:44px;font-size:15px;font-weight:600;cursor:pointer}
-.btn-outline{background:white;border:1.5px solid #2d8c3c;color:#2d8c3c;padding:12px;border-radius:44px;font-size:14px;font-weight:500;cursor:pointer}
-.btn-sm{padding:8px 16px;font-size:13px}
-.vendor-status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.filter-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px;-webkit-overflow-scrolling:touch}
+.chip{background:#f0f4f0;border:none;border-radius:30px;padding:6px 14px;font-size:13px;white-space:nowrap;cursor:pointer;transition:all 0.2s;color:#4a5e4a}
+.chip.active{background:#2d8c3c;color:white}
+.map-wrapper{position:relative;border-radius:20px;overflow:hidden;margin-bottom:16px}
+.map-container{height:350px;width:100%;position:relative;background:#e8ece8;border-radius:20px}
+#map{height:100%;width:100%;border-radius:20px}
+.map-controls{position:absolute;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:400}
+.map-control-btn{width:44px;height:44px;background:white;border:none;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:pointer;color:#2d8c3c;font-size:18px;transition:all 0.2s;z-index:401}
+.map-control-btn:active{transform:scale(0.95)}
+.btn{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:30px;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.2s}
+.btn:active{transform:scale(0.97)}
+.btn-outline{background:white;border:1px solid #2d8c3c;color:#2d8c3c;padding:10px;border-radius:30px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}
+.btn-sm{padding:6px 14px;font-size:13px;width:auto}
+.vendor-status{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600}
 .vendor-status.open{background:#e8f5e9;color:#2d8c3c}
 .vendor-status.closed{background:#ffebee;color:#e53935}
-.stars{color:#ffb800;font-size:13px}
-.badge{background:#f0f4f0;padding:4px 12px;border-radius:20px;font-size:12px;color:#1a2e1a}
-.text-secondary{color:#8ba88b;font-size:13px}
+.stars{color:#ffb800;font-size:12px;letter-spacing:1px}
+.badge{background:#f0f4f0;padding:2px 10px;border-radius:20px;font-size:11px;color:#4a5e4a}
+.text-secondary{color:#8ba88b;font-size:12px}
 .text-center{text-align:center}
 .mt-1{margin-top:4px}
 .mt-2{margin-top:8px}
 .mt-3{margin-top:12px}
-.mt-4{margin-top:16px}
 .mb-2{margin-bottom:8px}
 .flex{display:flex}
 .justify-between{justify-content:space-between}
 .items-center{align-items:center}
 .gap-2{gap:8px}
 .gap-3{gap:12px}
-.avatar{width:48px;height:48px;background:linear-gradient(135deg,#2d8c3c,#1a6b28);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:20px}
-.avatar-select{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}
-.avatar-option{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer;border:3px solid transparent}
-.avatar-option.selected{border-color:#2d8c3c;transform:scale(1.05)}
-.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;object-fit:cover}
+.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0f4f0}
 .image-thumb img{width:100%;height:100%;object-fit:cover}
-.menu-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #e8ece8}
-.menu-item-image{width:60px;height:60px;background:#f0f4f0;border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.menu-item-info{flex:1}
-.menu-item-name{font-weight:600;color:#1a2e1a}
-.menu-item-price{color:#2d8c3c;font-weight:700}
 .modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
 .modal.show{display:flex}
-.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:80vh;overflow-y:auto;padding:24px}
-.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700}
-.modal-close{font-size:28px;cursor:pointer;color:#8ba88b}
+.modal-content{background:white;border-radius:24px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;z-index:1001}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:18px;font-weight:700;color:#1a2e1a}
+.modal-close{font-size:24px;cursor:pointer;color:#8ba88b;padding:8px}
 .hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
 .hamburger-menu.show{right:0}
-.menu-item{padding:16px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px}
+.menu-item{padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px;font-size:14px}
 .menu-item:hover{background:#f0f4f0}
 .menu-divider{height:1px;background:#e8ece8;margin:12px 0}
-.input{width:100%;padding:14px 16px;border:1.5px solid #e0e8e0;border-radius:14px;font-size:15px;margin-bottom:12px}
-.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:14px;border-radius:50px;text-align:center;z-index:1000}
+.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:12px;border-radius:30px;text-align:center;z-index:1000;font-size:13px}
+.avatar-select{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}
+.avatar-option{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer;border:3px solid transparent;transition:all 0.2s}
+.avatar-option.selected{border-color:#2d8c3c;transform:scale(1.05)}
+.avatar-option i{color:white}
+.input{width:100%;padding:12px 14px;border:1px solid #e0e8e0;border-radius:14px;font-size:14px;margin-bottom:12px;background:#f8faf8}
+.input:focus{outline:none;border-color:#2d8c3c}
+.eula-text{max-height:300px;overflow-y:auto;background:#f8faf8;padding:16px;border-radius:16px;margin:16px 0;font-size:13px;line-height:1.6;color:#4a5e4a}
+.eula-text h4{color:#1a2e1a;margin-bottom:12px}
+.eula-text p{margin-bottom:10px}
+.eula-text ul{margin-left:20px;margin-bottom:10px}
+.eula-text li{margin-bottom:5px}
+.checkbox-row{display:flex;align-items:center;gap:12px;margin:16px 0}
+.checkbox-row input{width:18px;height:18px;accent-color:#2d8c3c}
+.leaflet-control-container .leaflet-top.leaflet-right{z-index:10}
+.leaflet-popup{z-index:20}
+.leaflet-control-attribution{z-index:10}
+.leaflet-control-zoom{z-index:20}
 </style>
 
 <div class="app-bar">
@@ -1830,34 +2188,90 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 
 <div class="content" id="content"></div>
 
-<div class="modal" id="avatarModal">
+<!-- Avatar & EULA Modal -->
+<div id="welcomeModal" class="modal">
     <div class="modal-content">
-        <div class="modal-header"><h3><i class="fas fa-user-circle"></i> Choose Avatar</h3><span class="modal-close" onclick="window.location.href='/'">&times;</span></div>
-        <input type="text" id="pseudoName" class="input" placeholder="Your display name" maxlength="20">
-        <div class="avatar-select" id="avatarSelect">
-            <div class="avatar-option" style="background:#667eea" data-icon="user-circle" onclick="selectAvatar(this)"><i class="fas fa-user-circle"></i></div>
-            <div class="avatar-option" style="background:#f093fb" data-icon="cat" onclick="selectAvatar(this)"><i class="fas fa-cat"></i></div>
-            <div class="avatar-option" style="background:#4facfe" data-icon="dog" onclick="selectAvatar(this)"><i class="fas fa-dog"></i></div>
-            <div class="avatar-option" style="background:#43e97b" data-icon="pizza-slice" onclick="selectAvatar(this)"><i class="fas fa-pizza-slice"></i></div>
-            <div class="avatar-option" style="background:#fa709a" data-icon="ice-cream" onclick="selectAvatar(this)"><i class="fas fa-ice-cream"></i></div>
-            <div class="avatar-option" style="background:#f6d365" data-icon="hamburger" onclick="selectAvatar(this)"><i class="fas fa-hamburger"></i></div>
-            <div class="avatar-option" style="background:#30cfd0" data-icon="fish" onclick="selectAvatar(this)"><i class="fas fa-fish"></i></div>
-            <div class="avatar-option" style="background:#a8edea" data-icon="apple-alt" onclick="selectAvatar(this)"><i class="fas fa-apple-alt"></i></div>
+        <div class="modal-header">
+            <h3><i class="fas fa-user-plus"></i> Welcome to Lako</h3>
+            <span class="modal-close" onclick="closeWelcomeModal()">&times;</span>
         </div>
-        <button class="btn" onclick="saveGuest()"><i class="fas fa-check"></i> Continue</button>
+        <div id="welcomeStep1">
+            <div class="text-center mb-3">
+                <div style="font-size:48px;margin-bottom:8px"><i class="fas fa-user-astronaut"></i></div>
+                <h3>Choose Your Avatar</h3>
+                <p class="text-secondary">Pick a character to represent you</p>
+            </div>
+            <div class="avatar-select" id="avatarSelect">
+                <div class="avatar-option" style="background:#667eea" data-icon="user-circle" onclick="selectAvatar(this)"><i class="fas fa-user-circle"></i></div>
+                <div class="avatar-option" style="background:#f093fb" data-icon="cat" onclick="selectAvatar(this)"><i class="fas fa-cat"></i></div>
+                <div class="avatar-option" style="background:#4facfe" data-icon="dog" onclick="selectAvatar(this)"><i class="fas fa-dog"></i></div>
+                <div class="avatar-option" style="background:#43e97b" data-icon="pizza-slice" onclick="selectAvatar(this)"><i class="fas fa-pizza-slice"></i></div>
+                <div class="avatar-option" style="background:#fa709a" data-icon="ice-cream" onclick="selectAvatar(this)"><i class="fas fa-ice-cream"></i></div>
+                <div class="avatar-option" style="background:#f6d365" data-icon="hamburger" onclick="selectAvatar(this)"><i class="fas fa-hamburger"></i></div>
+                <div class="avatar-option" style="background:#30cfd0" data-icon="fish" onclick="selectAvatar(this)"><i class="fas fa-fish"></i></div>
+                <div class="avatar-option" style="background:#a8edea" data-icon="apple-alt" onclick="selectAvatar(this)"><i class="fas fa-apple-alt"></i></div>
+            </div>
+            <input type="text" id="guestName" class="input" placeholder="Your display name" maxlength="20">
+            <button class="btn" onclick="showEULAStep()"><i class="fas fa-arrow-right"></i> Continue</button>
+        </div>
+        
+        <div id="welcomeStep2" style="display:none">
+            <div class="text-center mb-3">
+                <div style="font-size:48px;margin-bottom:8px"><i class="fas fa-file-contract"></i></div>
+                <h3>Terms of Service</h3>
+                <p class="text-secondary">Please read and accept our terms</p>
+            </div>
+            <div class="eula-text">
+                <h4>📜 LAKO TERMS OF SERVICE</h4>
+                <p>Welcome to Lako, the GPS-based vendor discovery app for Tiaong, Quezon!</p>
+                <p><strong>1. Acceptance of Terms</strong><br>By using Lako, you agree to these terms.</p>
+                <p><strong>2. User Conduct</strong><br>You agree to use the app responsibly and respectfully.</p>
+                <p><strong>3. Privacy</strong><br>Your location data is used only for finding nearby vendors. We never share your personal information.</p>
+                <p><strong>4. Vendor Information</strong><br>Vendors are responsible for the accuracy of their business information.</p>
+                <p><strong>5. Location Sharing</strong><br>You can choose to share your location for better vendor recommendations.</p>
+                <p><strong>6. Account Security</strong><br>You are responsible for maintaining the security of your account.</p>
+                <p><strong>7. Content Ownership</strong><br>You retain ownership of content you post, but grant Lako a license to display it.</p>
+                <p><strong>8. Prohibited Activities</strong><br>Do not harass users, post false information, or attempt to hack the app.</p>
+                <p><strong>9. Termination</strong><br>We may terminate accounts that violate these terms.</p>
+                <p><strong>10. Changes to Terms</strong><br>We may update these terms. Continued use means acceptance.</p>
+                <p><strong>11. Disclaimer</strong><br>Lako is provided "as is" without warranties.</p>
+                <p><strong>12. Contact</strong><br>Questions? Email support@lako.app</p>
+                <p style="margin-top:16px"><strong>By continuing, you agree to all terms above.</strong></p>
+            </div>
+            <div class="checkbox-row">
+                <input type="checkbox" id="agreeEULA" onchange="toggleCompleteButton()"> 
+                <span>I have read and agree to the <strong>Terms of Service</strong></span>
+            </div>
+            <div class="flex gap-2">
+                <button class="btn-outline" onclick="backToAvatar()"><i class="fas fa-arrow-left"></i> Back</button>
+                <button class="btn" onclick="completeGuestSetup()" id="completeBtn" disabled><i class="fas fa-check"></i> Start Exploring</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="vendorModal" onclick="if(event.target===this)closeModal()">
+    <div class="modal-content">
+        <div class="modal-header"><h3 id="modalTitle"></h3><span class="modal-close" onclick="closeModal()">&times;</span></div>
+        <div id="modalBody"></div>
     </div>
 </div>
 
 <div class="bottom-nav">
     <div class="nav-item active" onclick="showPage('map')"><i class="fas fa-map"></i><span>Map</span></div>
     <div class="nav-item" onclick="showPage('vendors')"><i class="fas fa-store"></i><span>Vendors</span></div>
-    <div class="nav-item" onclick="showPage('feed')"><i class="fas fa-comments"></i><span>Feed</span></div>
-    <div class="nav-item" onclick="showPage('saved')"><i class="fas fa-bookmark"></i><span>Saved</span></div>
+    <div class="nav-item" onclick="showPage('feed')"><i class="fas fa-newspaper"></i><span>Feed</span></div>
 </div>
 
 <script>
-let userLocation = null, allVendors = [], savedVendors = [], page = 'map', map = null;
-let selectedAvatar = null;
+let userLocation = null, allVendors = [], allProducts = [];
+let page = 'map', map = null;
+let heatLayer = null, fenceLayer = null, markerCluster = null;
+let heatActive = false, fenceActive = false;
+let guestProfile = null;
+let selectedAvatarObj = null;
+
+const CATEGORIES = ["Coffee","Pancit","Tusok Tusok","Contemporary Street food","Bread and Pastry","Lomi","Beverage","Sarisari Store","Karendirya","Traditional Desserts","Contemporary Desserts","Squidball","Siomai","Siopao","Taho","Balut and other poultry","Corn","Fruit shakes","Fruit Juice"];
 
 function showToast(msg){
     let t=document.querySelector('.toast');
@@ -1872,23 +2286,68 @@ function showToast(msg){
 function selectAvatar(el) {
     document.querySelectorAll('.avatar-option').forEach(a => a.classList.remove('selected'));
     el.classList.add('selected');
-    selectedAvatar = { icon: el.dataset.icon, color: el.style.background };
+    selectedAvatarObj = { icon: el.dataset.icon, color: el.style.background };
 }
 
-function saveGuest() {
-    const name = document.getElementById('pseudoName').value.trim();
-    if (!name || !selectedAvatar) { showToast('Enter name and select avatar'); return; }
-    localStorage.setItem('guest_profile', JSON.stringify({ name, avatar: selectedAvatar }));
-    document.getElementById('avatarModal').classList.remove('show');
+function toggleCompleteButton() {
+    const checkbox = document.getElementById('agreeEULA');
+    const btn = document.getElementById('completeBtn');
+    btn.disabled = !checkbox.checked;
+}
+
+function showEULAStep() {
+    const name = document.getElementById('guestName').value.trim();
+    if (!name) { 
+        showToast('Please enter your name'); 
+        return; 
+    }
+    if (!selectedAvatarObj) { 
+        showToast('Please select an avatar'); 
+        return; 
+    }
+    
+    guestProfile = { name: name, avatar: selectedAvatarObj };
+    
+    document.getElementById('welcomeStep1').style.display = 'none';
+    document.getElementById('welcomeStep2').style.display = 'block';
+}
+
+function backToAvatar() {
+    document.getElementById('welcomeStep2').style.display = 'none';
+    document.getElementById('welcomeStep1').style.display = 'block';
+}
+
+function completeGuestSetup() {
+    if (!document.getElementById('agreeEULA').checked) {
+        showToast('Please agree to the Terms of Service');
+        return;
+    }
+    
+    localStorage.setItem('guest_profile', JSON.stringify(guestProfile));
+    closeWelcomeModal();
     document.querySelector('.bottom-nav').style.display = 'flex';
     loadData();
+    showToast('Welcome to Lako! 🍢');
+}
+
+function closeWelcomeModal() {
+    document.getElementById('welcomeModal').classList.remove('show');
 }
 
 function checkFirstTime() {
-    if (!localStorage.getItem('guest_profile')) {
-        document.getElementById('avatarModal').classList.add('show');
+    const savedProfile = localStorage.getItem('guest_profile');
+    if (!savedProfile) {
+        document.getElementById('welcomeModal').classList.add('show');
+        document.querySelector('.bottom-nav').style.display = 'none';
+        document.getElementById('welcomeStep1').style.display = 'block';
+        document.getElementById('welcomeStep2').style.display = 'none';
+        document.getElementById('agreeEULA').checked = false;
+        document.getElementById('completeBtn').disabled = true;
+        document.getElementById('guestName').value = '';
+        selectedAvatarObj = null;
+        document.querySelectorAll('.avatar-option').forEach(a => a.classList.remove('selected'));
     } else {
-        savedVendors = JSON.parse(localStorage.getItem('saved_vendors') || '[]');
+        guestProfile = JSON.parse(savedProfile);
         document.querySelector('.bottom-nav').style.display = 'flex';
         loadData();
     }
@@ -1898,41 +2357,54 @@ async function loadData() {
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(p => {
             userLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
-            loadVendors();
+            loadVendorsAndProducts();
+            showToast('📍 Location detected!');
         }, () => {
             userLocation = { lat: 14.5995, lng: 120.9842 };
-            loadVendors();
+            loadVendorsAndProducts();
+            showToast('📍 Using default location (Tiaong)');
         });
     } else {
         userLocation = { lat: 14.5995, lng: 120.9842 };
-        loadVendors();
+        loadVendorsAndProducts();
     }
 }
 
-async function loadVendors() {
-    const res = await fetch(`/api/customer/map/vendors?lat=${userLocation.lat}&lng=${userLocation.lng}`);
+async function loadVendorsAndProducts() {
+    const res = await fetch(`/api/guest/map/vendors?lat=${userLocation.lat}&lng=${userLocation.lng}`);
     const data = await res.json();
-    allVendors = data.vendors || [];
-    if (page === 'map') showMap();
-    else if (page === 'vendors') showVendors();
+    if (data && data.vendors) {
+        allVendors = data.vendors;
+        allProducts = [];
+        for (let vendor of allVendors) {
+            const productsRes = await fetch(`/api/customer/products/${vendor.id}`);
+            const products = await productsRes.json();
+            for (let product of (products.products || [])) {
+                product.vendor = vendor;
+                allProducts.push(product);
+            }
+        }
+        if (page === 'map') showMap();
+        else if (page === 'vendors') showVendors();
+        else if (page === 'feed') showFeed();
+    }
 }
 
 function showPage(p) {
     page = p;
     document.querySelectorAll('.nav-item').forEach((el, i) => {
-        const pages = ['map', 'vendors', 'feed', 'saved'];
+        const pages = ['map', 'vendors', 'feed'];
         el.classList.toggle('active', pages[i] === p);
     });
     if (p === 'map') showMap();
     else if (p === 'vendors') showVendors();
     else if (p === 'feed') showFeed();
-    else if (p === 'saved') showSaved();
 }
 
 function showMap() {
     document.getElementById('content').innerHTML = `
         <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="searchBox" placeholder="Search vendors..." oninput="filterMarkers()"></div>
-        <div class="map-wrapper"><div class="map-container"><div id="map"></div><div class="map-controls"><button class="map-control-btn" onclick="centerOnUser()"><i class="fas fa-location-dot"></i></button></div></div></div>
+        <div class="map-wrapper"><div class="map-container"><div id="map"></div><div class="map-controls"><button class="map-control-btn" onclick="centerOnUser()"><i class="fas fa-location-dot"></i></button><button class="map-control-btn" id="heatBtn" onclick="toggleHeatmap()"><i class="fas fa-fire"></i></button><button class="map-control-btn" id="fenceBtn" onclick="toggleGeofence()"><i class="fas fa-circle"></i></button><button class="map-control-btn" id="clusterBtn" onclick="toggleCluster()"><i class="fas fa-layer-group"></i></button></div></div></div>
         <div class="flex justify-between items-center mb-2"><h4><i class="fas fa-store"></i> Nearby Vendors</h4><span class="text-secondary">${allVendors.length} found</span></div>
         <div id="nearbyList"></div>`;
     
@@ -1941,407 +2413,9 @@ function showMap() {
         map = L.map('map').setView([userLocation.lat, userLocation.lng], 14);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
         
-        allVendors.forEach(v => {
-            if (v.latitude && v.longitude) {
-                const marker = L.marker([v.latitude, v.longitude])
-                    .bindPopup(`<b>${v.business_name}</b><br>${v.category}<br>⭐ ${v.rating || 'New'}`)
-                    .on('click', () => showVendorModal(v.id));
-                marker.addTo(map);
-            }
-        });
-        updateNearbyList();
-    }, 100);
-}
-
-function filterMarkers() {
-    const query = document.getElementById('searchBox')?.value.toLowerCase() || '';
-    if (!map) return;
-    map.eachLayer(layer => {
-        if (layer instanceof L.Marker) {
-            const popup = layer.getPopup();
-            const name = popup?.getContent()?.split('<b>')[1]?.split('</b>')[0]?.toLowerCase() || '';
-            if (name.includes(query)) {
-                layer.addTo(map);
-            } else {
-                map.removeLayer(layer);
-            }
-        }
-    });
-}
-
-function updateNearbyList() {
-    const list = document.getElementById('nearbyList');
-    if (list) {
-        const sorted = [...allVendors].sort((a,b) => (a.distance || 999) - (b.distance || 999));
-        list.innerHTML = sorted.slice(0,8).map(v => `
-            <div class="card" onclick="showVendorModal('${v.id}')">
-                <div class="flex justify-between items-center">
-                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category} • ${v.distance ? v.distance + 'km' : 'Nearby'}</span></div>
-                    <div class="stars">${'★'.repeat(Math.floor(v.rating || 0))}</div>
-                </div>
-            </div>
-        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors found nearby</div>';
-    }
-}
-
-function showVendors() {
-    document.getElementById('content').innerHTML = `
-        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="vendorSearch" placeholder="Search vendors..." oninput="filterVendorList()"></div>
-        <div class="filter-chips" id="categoryFilters">${CATEGORIES.slice(0,8).map(c => `<div class="chip" onclick="filterByCategory('${c}')">${c}</div>`).join('')}<div class="chip" onclick="filterByCategory('all')">All</div></div>
-        <div id="vendorList"></div>`;
-    filterVendorList();
-}
-
-let activeCategory = 'all';
-
-function filterByCategory(cat) {
-    activeCategory = cat;
-    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-    if (cat !== 'all') event.target.classList.add('active');
-    filterVendorList();
-}
-
-function filterVendorList() {
-    const query = document.getElementById('vendorSearch')?.value.toLowerCase() || '';
-    let filtered = allVendors.filter(v => v.business_name.toLowerCase().includes(query) || v.category.toLowerCase().includes(query));
-    if (activeCategory !== 'all') filtered = filtered.filter(v => v.category === activeCategory);
-    document.getElementById('vendorList').innerHTML = filtered.map(v => `
-        <div class="card" onclick="showVendorModal('${v.id}')">
-            <div class="flex justify-between items-center">
-                <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating || 0))}</div></div>
-                <span class="vendor-status ${v.is_open ? 'open' : 'closed'}"><i class="fas ${v.is_open ? 'fa-clock' : 'fa-clock'}"></i> ${v.is_open ? 'Open' : 'Closed'}</span>
-            </div>
-        </div>
-    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors found</div>';
-}
-
-async function showFeed() {
-    const res = await fetch('/api/guest/feed');
-    const data = await res.json();
-    document.getElementById('content').innerHTML = (data.posts || []).map(p => `
-        <div class="card">
-            <div class="flex items-center gap-3">
-                <div class="avatar"><i class="fas fa-user-circle"></i></div>
-                <div><strong>${p.author || 'User'}</strong><br><span class="text-secondary"><i class="far fa-calendar-alt"></i> ${new Date(p.created_at).toLocaleDateString()}</span></div>
-            </div>
-            <p class="mt-2">${p.content}</p>
-            <div class="flex gap-3 mt-3">
-                <span><i class="far fa-heart"></i> ${p.likes || 0}</span>
-                <span><i class="far fa-comment"></i> ${p.comment_count || 0}</span>
-            </div>
-        </div>
-    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No posts yet</div>';
-}
-
-function showSaved() {
-    const saved = allVendors.filter(v => savedVendors.includes(v.id));
-    document.getElementById('content').innerHTML = saved.map(v => `
-        <div class="card" onclick="showVendorModal('${v.id}')">
-            <div class="flex justify-between items-center">
-                <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span></div>
-                <button class="btn-outline btn-sm" onclick="event.stopPropagation(); toggleSave('${v.id}')"><i class="fas fa-trash"></i> Remove</button>
-            </div>
-        </div>
-    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-bookmark"></i> No saved vendors yet</div>';
-}
-
-async function showVendorModal(vendorId) {
-    const v = allVendors.find(v => v.id === vendorId);
-    if (!v) return;
-    const isSaved = savedVendors.includes(v.id);
-    
-    const productsRes = await fetch(`/api/customer/products/${vendorId}`);
-    const productsData = await productsRes.json();
-    const products = productsData.products || productsData || [];
-    
-    const modal = document.getElementById('vendorModal');
-    if(!modal) {
-        let m = document.createElement('div');
-        m.id = 'vendorModal';
-        m.className = 'modal';
-        m.onclick = function(e){ if(e.target===this)closeModal(); };
-        m.innerHTML = '<div class="modal-content"><div class="modal-header"><h3 id="modalTitle"></h3><span class="modal-close" onclick="closeModal()">&times;</span></div><div id="modalBody"></div></div>';
-        document.body.appendChild(m);
-    }
-    
-    document.getElementById('modalTitle').innerHTML = `<i class="fas fa-store"></i> ${v.business_name}`;
-    document.getElementById('modalBody').innerHTML = `
-        <p><span class="badge"><i class="fas fa-tag"></i> ${v.category}</span> <span class="vendor-status ${v.is_open ? 'open' : 'closed'}"><i class="fas ${v.is_open ? 'fa-clock' : 'fa-clock'}"></i> ${v.is_open ? 'Open Now' : 'Closed'}</span></p>
-        <p><i class="fas fa-map-marker-alt"></i> ${v.address || 'No address'}</p>
-        <p><i class="fas fa-star" style="color:#ffb800;"></i> ${v.rating || 'New'} (${v.review_count || 0} reviews)</p>
-        <p><i class="fas fa-phone"></i> ${v.phone || 'No phone'}</p>
-        <div class="mt-3"><strong><i class="fas fa-utensils"></i> Menu</strong></div>
-        <div id="menuItems">${products.map(p => `
-            <div class="menu-item">
-                ${p.images && p.images[0] ? `<div class="menu-item-image"><img src="${p.images[0].thumbnail}"></div>` : `<div class="menu-item-image"><i class="fas fa-utensils"></i></div>`}
-                <div class="menu-item-info">
-                    <div class="menu-item-name">${p.name}</div>
-                    <div class="menu-item-price">₱${p.price}</div>
-                    ${p.description ? `<div class="text-secondary"><i class="fas fa-info-circle"></i> ${p.description}</div>` : ''}
-                </div>
-            </div>
-        `).join('') || '<p class="text-secondary"><i class="fas fa-info-circle"></i> No menu items yet</p>'}</div>
-        <div class="flex gap-2 mt-3">
-            <button class="btn" onclick="navigateTo(${v.latitude}, ${v.longitude})"><i class="fas fa-directions"></i> Navigate</button>
-            <button class="btn-outline" onclick="toggleSave('${v.id}')"><i class="fas ${isSaved ? 'fa-bookmark' : 'fa-bookmark'}"></i> ${isSaved ? 'Saved' : 'Save'}</button>
-        </div>
-    `;
-    document.getElementById('vendorModal').classList.add('show');
-}
-
-function toggleSave(vendorId) {
-    const index = savedVendors.indexOf(vendorId);
-    if (index === -1) { savedVendors.push(vendorId); showToast('Added to saved!'); }
-    else { savedVendors.splice(index, 1); showToast('Removed from saved'); }
-    localStorage.setItem('saved_vendors', JSON.stringify(savedVendors));
-    closeModal();
-    if (page === 'saved') showSaved();
-}
-
-function navigateTo(lat, lng) {
-    closeModal();
-    showPage('map');
-    setTimeout(() => {
-        if (map) map.setView([lat, lng], 16);
-        showToast('Route ready!');
-    }, 100);
-}
-
-function centerOnUser() {
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(p => {
-            userLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
-            if (map) map.setView([userLocation.lat, userLocation.lng], 15);
-            loadVendors();
-            showToast('Recentered on your location');
-        });
-    } else if (map && userLocation) map.setView([userLocation.lat, userLocation.lng], 15);
-}
-
-function closeModal() { 
-    let m = document.getElementById('vendorModal');
-    if(m) m.classList.remove('show'); 
-}
-function toggleMenu() { document.getElementById('hamburgerMenu').classList.toggle('show'); }
-
-let fa=document.createElement('link');fa.rel='stylesheet';fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';document.head.appendChild(fa);
-let leaflet=document.createElement('link');leaflet.rel='stylesheet';leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(leaflet);
-let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';document.head.appendChild(leafletScript);
-
-checkFirstTime();
-</script>
-''')
-
-CUSTOMER_DASH = render_page("Customer Dashboard", '''
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-.app-bar{background:white;padding:16px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
-.app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
-.menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
-.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px)}
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05)}
-.nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer;transition:all 0.2s}
-.nav-item i{font-size:22px}
-.nav-item.active{color:#2d8c3c}
-.nav-item span{font-size:11px;font-weight:500}
-.card{background:white;border-radius:24px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);transition:transform 0.2s,box-shadow 0.2s}
-.card:active{transform:scale(0.98)}
-.search-bar{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:44px;padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:20px}
-.search-bar i{color:#8ba88b;font-size:16px}
-.search-bar input{flex:1;border:none;background:transparent;font-size:15px;outline:none}
-.filter-chips{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;margin-bottom:20px}
-.chip{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:40px;padding:8px 16px;font-size:13px;white-space:nowrap;cursor:pointer;transition:all 0.2s}
-.chip.active{background:#2d8c3c;color:white;border-color:#2d8c3c}
-.map-wrapper{background:#e8ece8;border-radius:24px;overflow:hidden;margin-bottom:20px;position:relative}
-.map-container{height:320px;position:relative}
-#map{height:100%;width:100%}
-.map-controls{position:absolute;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px}
-.map-control-btn{width:44px;height:44px;background:white;border:none;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);cursor:pointer;color:#2d8c3c;font-size:18px;transition:all 0.2s}
-.map-control-btn:active{transform:scale(0.95)}
-.btn{width:100%;padding:14px;background:#2d8c3c;color:white;border:none;border-radius:44px;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.2s}
-.btn:active{transform:scale(0.97);background:#1a6b28}
-.btn-outline{background:white;border:1.5px solid #2d8c3c;color:#2d8c3c;padding:12px;border-radius:44px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}
-.btn-outline:active{transform:scale(0.97);background:#f0f8f0}
-.btn-sm{padding:8px 16px;font-size:13px}
-.vendor-status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
-.vendor-status.open{background:#e8f5e9;color:#2d8c3c}
-.vendor-status.closed{background:#ffebee;color:#e53935}
-.stars{color:#ffb800;font-size:13px;letter-spacing:2px}
-.badge{background:#f0f4f0;padding:4px 12px;border-radius:20px;font-size:12px;color:#1a2e1a}
-.text-secondary{color:#8ba88b;font-size:13px}
-.text-center{text-align:center}
-.mt-1{margin-top:4px}
-.mt-2{margin-top:8px}
-.mt-3{margin-top:12px}
-.mt-4{margin-top:16px}
-.mb-2{margin-bottom:8px}
-.mb-3{margin-bottom:12px}
-.mb-4{margin-bottom:16px}
-.flex{display:flex}
-.flex-column{flex-direction:column}
-.justify-between{justify-content:space-between}
-.justify-center{justify-content:center}
-.items-center{align-items:center}
-.gap-2{gap:8px}
-.gap-3{gap:12px}
-.gap-4{gap:16px}
-.avatar{width:48px;height:48px;background:linear-gradient(135deg,#2d8c3c,#1a6b28);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:20px}
-.avatar-lg{width:80px;height:80px;background:linear-gradient(135deg,#2d8c3c,#1a6b28);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:36px;margin-bottom:16px}
-.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0f4f0}
-.image-thumb img{width:100%;height:100%;object-fit:cover}
-.menu-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #e8ece8}
-.menu-item-image{width:60px;height:60px;background:#f0f4f0;border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.menu-item-image img{width:100%;height:100%;object-fit:cover}
-.menu-item-info{flex:1}
-.menu-item-name{font-weight:600;color:#1a2e1a;margin-bottom:4px}
-.menu-item-price{color:#2d8c3c;font-weight:700;font-size:14px}
-.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
-.modal.show{display:flex}
-.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:80vh;overflow-y:auto;padding:24px}
-.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#1a2e1a}
-.modal-close{font-size:28px;cursor:pointer;color:#8ba88b}
-.hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
-.hamburger-menu.show{right:0}
-.menu-item{padding:16px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px;transition:background 0.2s}
-.menu-item:hover{background:#f0f4f0}
-.menu-divider{height:1px;background:#e8ece8;margin:12px 0}
-.stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px}
-.stat-card{background:white;border-radius:20px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.stat-value{font-size:28px;font-weight:800;color:#2d8c3c}
-.stat-label{font-size:12px;color:#8ba88b;margin-top:4px}
-.chart-container{background:white;border-radius:20px;padding:16px;margin-bottom:20px}
-.loading{text-align:center;padding:40px;color:#8ba88b}
-.loading i{font-size:32px;margin-bottom:12px;display:block}
-.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:14px;border-radius:50px;text-align:center;z-index:1000;animation:fadeIn 0.3s}
-@keyframes fadeIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-</style>
-
-<div class="app-bar">
-    <button class="back-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i></button>
-    <div class="app-bar-title">Lako</div>
-    <button class="menu-btn" onclick="toggleMenu()"><i class="fas fa-bars"></i></button>
-</div>
-
-<div id="hamburgerMenu" class="hamburger-menu">
-    <div class="menu-item" onclick="showAnalytics()"><i class="fas fa-chart-line"></i> My Activity</div>
-    <div class="menu-item" onclick="showSettings()"><i class="fas fa-cog"></i> Settings</div>
-    <div class="menu-divider"></div>
-    <div class="menu-item" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
-</div>
-
-<div class="bottom-nav">
-    <div class="nav-item active" onclick="showPage('map')"><i class="fas fa-map"></i><span>Map</span></div>
-    <div class="nav-item" onclick="showPage('vendors')"><i class="fas fa-store"></i><span>Vendors</span></div>
-    <div class="nav-item" onclick="showPage('feed')"><i class="fas fa-comments"></i><span>Feed</span></div>
-    <div class="nav-item" onclick="showPage('saved')"><i class="fas fa-bookmark"></i><span>Saved</span></div>
-    <div class="nav-item" onclick="showPage('profile')"><i class="fas fa-user"></i><span>Profile</span></div>
-</div>
-
-<div class="content" id="content"></div>
-
-<div class="modal" id="vendorModal" onclick="if(event.target===this)closeModal()">
-    <div class="modal-content">
-        <div class="modal-header"><h3 id="modalTitle"></h3><span class="modal-close" onclick="closeModal()">&times;</span></div>
-        <div id="modalBody"></div>
-    </div>
-</div>
-
-<div class="modal" id="postModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Share Your Experience</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div>
-        <textarea id="postContent" class="input" placeholder="What's your favorite food today?" rows="4"></textarea>
-        <input type="file" id="postImages" multiple accept="image/*" style="margin:12px 0;padding:8px">
-        <button class="btn" onclick="createPost()">Post</button>
-    </div>
-</div>
-
-<div class="modal" id="analyticsModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Your Activity</h3><span class="modal-close" onclick="closeAnalyticsModal()">&times;</span></div>
-        <div id="analyticsContent"></div>
-    </div>
-</div>
-
-<script>
-let sessionToken = localStorage.getItem('session_token');
-let userLocation = null, allVendors = [], savedVendors = [], page = 'map', map = null;
-let heatLayer = null, fenceLayer = null, markerCluster = null, routingControl = null;
-let heatActive = false, fenceActive = false;
-
-if (!sessionToken) window.location.href = '/auth';
-
-function showToast(msg){
-    let t=document.querySelector('.toast');
-    if(t)t.remove();
-    t=document.createElement('div');
-    t.className='toast';
-    t.innerHTML='<i class="fas fa-info-circle"></i> '+msg;
-    document.body.appendChild(t);
-    setTimeout(()=>t.remove(),3000);
-}
-
-async function api(url, options = {}) {
-    const res = await fetch(url, {
-        ...options,
-        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken, ...options.headers }
-    });
-    if (res.status === 401) { localStorage.clear(); window.location.href = '/auth'; return null; }
-    return res.json();
-}
-
-async function loadData() {
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(p => {
-            userLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
-            loadVendors();
-        }, () => {
-            userLocation = { lat: 14.5995, lng: 120.9842 };
-            loadVendors();
-        });
-    } else {
-        userLocation = { lat: 14.5995, lng: 120.9842 };
-        loadVendors();
-    }
-    loadSaved();
-}
-
-async function loadVendors() {
-    const data = await api(`/api/customer/map/vendors?lat=${userLocation.lat}&lng=${userLocation.lng}`);
-    if (data) { allVendors = data.vendors || []; if (page === 'map') showMap(); else if (page === 'vendors') showVendors(); }
-}
-
-async function loadSaved() {
-    const data = await api('/api/customer/shortlist');
-    if (data) { savedVendors = data.vendors || []; if (page === 'saved') showSaved(); }
-}
-
-function showPage(p) {
-    page = p;
-    document.querySelectorAll('.nav-item').forEach((el, i) => {
-        const pages = ['map', 'vendors', 'feed', 'saved', 'profile'];
-        el.classList.toggle('active', pages[i] === p);
-    });
-    if (p === 'map') showMap();
-    else if (p === 'vendors') showVendors();
-    else if (p === 'feed') showFeed();
-    else if (p === 'saved') showSaved();
-    else if (p === 'profile') showProfile();
-}
-
-function showMap() {
-    document.getElementById('content').innerHTML = `
-        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="searchBox" placeholder="Search vendors..." oninput="filterMarkers()"></div>
-        <div class="map-wrapper"><div class="map-container"><div id="map"></div><div class="map-controls"><button class="map-control-btn" onclick="centerOnUser()"><i class="fas fa-location-dot"></i></button><button class="map-control-btn" id="heatBtn" onclick="toggleHeatmap()"><i class="fas fa-fire"></i></button><button class="map-control-btn" id="fenceBtn" onclick="toggleGeofence()"><i class="fas fa-circle"></i></button><button class="map-control-btn" id="clusterBtn" onclick="toggleCluster()"><i class="fas fa-layer-group"></i></button></div></div></div>
-        <div class="flex justify-between items-center mb-3"><h4><i class="fas fa-store"></i> Nearby Vendors</h4><span class="text-secondary">${allVendors.length} found</span></div>
-        <div id="nearbyList"></div>`;
-    
-    setTimeout(() => {
-        if (map) map.remove();
-        map = L.map('map').setView([userLocation.lat, userLocation.lng], 14);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+        L.circle([userLocation.lat, userLocation.lng], {
+            radius: 50, color: '#2d8c3c', fillColor: '#2d8c3c', fillOpacity: 0.3, weight: 3
+        }).addTo(map).bindPopup('<b>You are here</b>').openPopup();
         
         markerCluster = L.markerClusterGroup();
         allVendors.forEach(v => {
@@ -2374,14 +2448,14 @@ function updateNearbyList() {
     const list = document.getElementById('nearbyList');
     if (list) {
         const sorted = [...allVendors].sort((a,b) => (a.distance || 999) - (b.distance || 999));
-        list.innerHTML = sorted.slice(0,8).map(v => `
+        list.innerHTML = sorted.slice(0,10).map(v => `
             <div class="card" onclick="showVendorModal('${v.id}')">
                 <div class="flex justify-between items-center">
-                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category} • ${v.distance ? v.distance + 'km' : 'Nearby'}</span></div>
-                    <div class="stars">${'★'.repeat(Math.floor(v.rating || 0))}${'☆'.repeat(5-Math.floor(v.rating || 0))}</div>
+                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span></div>
+                    <div><div class="stars">${'★'.repeat(Math.floor(v.rating || 0))}</div><div class="text-secondary">${v.distance ? v.distance + 'km' : ''}</div></div>
                 </div>
             </div>
-        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors found nearby</div>';
+        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors nearby</div>';
     }
 }
 
@@ -2409,76 +2483,711 @@ function filterVendorList() {
     document.getElementById('vendorList').innerHTML = filtered.map(v => `
         <div class="card" onclick="showVendorModal('${v.id}')">
             <div class="flex justify-between items-center">
-                <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating || 0))}${'☆'.repeat(5-Math.floor(v.rating || 0))}</div></div>
-                <span class="vendor-status ${v.is_open ? 'open' : 'closed'}"><i class="fas ${v.is_open ? 'fa-clock' : 'fa-clock'}"></i> ${v.is_open ? 'Open' : 'Closed'}</span>
+                <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating || 0))}</div></div>
+                <span class="vendor-status ${v.is_open ? 'open' : 'closed'}">${v.is_open ? 'Open' : 'Closed'}</span>
             </div>
         </div>
     `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors found</div>';
 }
 
 async function showFeed() {
-    const data = await api('/api/customer/feed');
+    const res = await fetch('/api/guest/feed');
+    const data = await res.json();
     document.getElementById('content').innerHTML = `
-        <button class="btn" onclick="openPostModal()"><i class="fas fa-plus"></i> Share Your Experience</button>
-        <div id="feedList" class="mt-4"></div>`;
+        <div class="text-center mb-3"><p class="text-secondary"><i class="fas fa-info-circle"></i> Login to like, comment, and interact with posts</p></div>
+        <div id="feedList"></div>`;
     document.getElementById('feedList').innerHTML = (data.posts || []).map(p => `
         <div class="card">
             <div class="flex items-center gap-3">
-                <div class="avatar"><i class="fas fa-user-circle"></i></div>
-                <div><strong>${p.author || 'User'}</strong><br><span class="text-secondary"><i class="far fa-calendar-alt"></i> ${new Date(p.created_at).toLocaleDateString()}</span></div>
+                <div class="avatar" style="background:#f0f4f0;color:#2d8c3c"><i class="fas fa-user-circle"></i></div>
+                <div><strong>${p.author || 'User'}</strong><br><span class="text-secondary"><i class="far fa-clock"></i> ${new Date(p.created_at).toLocaleDateString()}</span></div>
+            </div>
+            <p class="mt-2">${p.content}</p>
+            ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail}"></div>`).join('')}</div>` : ''}
+            <div class="flex gap-3 mt-3">
+                <span class="text-secondary"><i class="far fa-heart"></i> ${p.likes || 0}</span>
+                <span class="text-secondary"><i class="far fa-comment"></i> ${p.comment_count || 0}</span>
+            </div>
+            <div class="mt-2 text-secondary" style="font-size:11px"><i class="fas fa-lock"></i> Login to interact</div>
+        </div>
+    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No posts yet</div>';
+}
+
+async function showVendorModal(vendorId) {
+    const v = allVendors.find(v => v.id === vendorId);
+    if (!v) return;
+    const products = allProducts.filter(p => p.vendor?.id === vendorId);
+    
+    document.getElementById('modalTitle').innerHTML = `<i class="fas fa-store"></i> ${v.business_name}`;
+    document.getElementById('modalBody').innerHTML = `
+        <p><span class="badge">${v.category}</span> <span class="vendor-status ${v.is_open ? 'open' : 'closed'}">${v.is_open ? 'Open Now' : 'Closed'}</span></p>
+        <p><i class="fas fa-map-marker-alt"></i> ${v.address || 'No address'}</p>
+        <p><i class="fas fa-star" style="color:#ffb800;"></i> ${v.rating || 'New'} (${v.review_count || 0} reviews)</p>
+        <div class="flex gap-2 mt-2">
+            <button class="btn-outline btn-sm" onclick="window.open('https://www.google.com/maps/dir/${userLocation.lat},${userLocation.lng}/${v.latitude},${v.longitude}', '_blank')"><i class="fas fa-directions"></i> Directions</button>
+            <button class="btn-outline btn-sm" onclick="location.href='/auth'"><i class="fas fa-heart"></i> Login to Save</button>
+        </div>
+        <div class="mt-3"><strong><i class="fas fa-utensils"></i> Menu</strong></div>
+        <div id="menuItems">${products.map(p => `
+            <div class="flex gap-3 p-3" style="border-bottom:1px solid #e8ece8">
+                ${p.images && p.images[0] ? `<div style="width:60px;height:60px;border-radius:12px;overflow:hidden"><img src="${p.images[0].thumbnail}" style="width:100%;height:100%;object-fit:cover"></div>` : `<div style="width:60px;height:60px;border-radius:12px;background:#f0f4f0;display:flex;align-items:center;justify-content:center"><i class="fas fa-utensils"></i></div>`}
+                <div>
+                    <div style="font-weight:600">${p.name}</div>
+                    <div style="color:#2d8c3c;font-weight:700">₱${p.price}</div>
+                </div>
+            </div>
+        `).join('') || '<p class="text-secondary">No menu items yet</p>'}</div>
+        <div class="mt-3 text-secondary text-center"><i class="fas fa-lock"></i> Login to write reviews and save vendors</div>
+    `;
+    document.getElementById('vendorModal').classList.add('show');
+}
+
+function closeModal() { document.getElementById('vendorModal').classList.remove('show'); }
+function centerOnUser() { if (map && userLocation) { map.setView([userLocation.lat, userLocation.lng], 15); showToast('Recentered'); } }
+function toggleHeatmap() { 
+    heatActive = !heatActive; 
+    const btn = document.getElementById('heatBtn'); 
+    if (heatActive) { 
+        const points = allVendors.filter(v => v.latitude).map(v => [v.latitude, v.longitude, 0.5]); 
+        heatLayer = L.heatLayer(points, { radius: 25 }).addTo(map); 
+        btn.style.background = '#2d8c3c'; 
+        btn.style.color = 'white'; 
+    } else { 
+        if (heatLayer) map.removeLayer(heatLayer); 
+        btn.style.background = 'white'; 
+        btn.style.color = '#2d8c3c'; 
+    } 
+}
+function toggleGeofence() { 
+    fenceActive = !fenceActive; 
+    const btn = document.getElementById('fenceBtn'); 
+    if (fenceActive) { 
+        fenceLayer = L.circle([userLocation.lat, userLocation.lng], { radius: 3000, color: '#2d8c3c', fillColor: '#2d8c3c', fillOpacity: 0.05 }).addTo(map); 
+        btn.style.background = '#2d8c3c'; 
+        btn.style.color = 'white'; 
+    } else { 
+        if (fenceLayer) map.removeLayer(fenceLayer); 
+        btn.style.background = 'white'; 
+        btn.style.color = '#2d8c3c'; 
+    } 
+}
+function toggleCluster() { location.reload(); }
+function toggleMenu() { document.getElementById('hamburgerMenu').classList.toggle('show'); }
+
+let fa=document.createElement('link');fa.rel='stylesheet';fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';document.head.appendChild(fa);
+let leaflet=document.createElement('link');leaflet.rel='stylesheet';leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(leaflet);
+let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';leafletScript.onload=()=>{if(page==='map') setTimeout(showMap,100);};document.head.appendChild(leafletScript);
+let leafletCluster=document.createElement('link');leafletCluster.rel='stylesheet';leafletCluster.href='https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css';document.head.appendChild(leafletCluster);
+let leafletClusterScript=document.createElement('script');leafletClusterScript.src='https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';document.head.appendChild(leafletClusterScript);
+let heatScript=document.createElement('script');heatScript.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js';document.head.appendChild(heatScript);
+
+checkFirstTime();
+</script>
+''')
+
+CUSTOMER_DASH = render_page("Customer Dashboard", '''
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#f8faf8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.app-bar{background:white;padding:16px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
+.back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
+.app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
+.menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
+.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:80px}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05);z-index:99}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer;transition:all 0.2s}
+.nav-item i{font-size:22px}
+.nav-item.active{color:#2d8c3c}
+.nav-item span{font-size:11px;font-weight:500}
+.card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03);border:0.5px solid rgba(0,0,0,0.03);transition:all 0.2s}
+.card:active{transform:scale(0.98)}
+.search-bar{background:white;border:1px solid #e0e8e0;border-radius:30px;padding:10px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.search-bar i{color:#8ba88b;font-size:16px}
+.search-bar input{flex:1;border:none;background:transparent;font-size:15px;outline:none}
+.filter-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px;-webkit-overflow-scrolling:touch}
+.chip{background:#f0f4f0;border:none;border-radius:30px;padding:6px 14px;font-size:13px;white-space:nowrap;cursor:pointer;transition:all 0.2s;color:#4a5e4a}
+.chip.active{background:#2d8c3c;color:white}
+.map-wrapper{position:relative;border-radius:20px;overflow:hidden;margin-bottom:16px}
+.map-container{height:350px;width:100%;position:relative;background:#e8ece8;border-radius:20px}
+#map{height:100%;width:100%;border-radius:20px}
+.map-controls{position:absolute;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:400}
+.map-control-btn{width:44px;height:44px;background:white;border:none;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:pointer;color:#2d8c3c;font-size:18px;transition:all 0.2s;z-index:401}
+.map-control-btn:active{transform:scale(0.95)}
+.btn{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:30px;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.2s}
+.btn:active{transform:scale(0.97)}
+.btn-outline{background:white;border:1px solid #2d8c3c;color:#2d8c3c;padding:10px;border-radius:30px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}
+.btn-sm{padding:6px 14px;font-size:13px;width:auto}
+.vendor-status{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.vendor-status.open{background:#e8f5e9;color:#2d8c3c}
+.vendor-status.closed{background:#ffebee;color:#e53935}
+.stars{color:#ffb800;font-size:12px;letter-spacing:1px}
+.badge{background:#f0f4f0;padding:2px 10px;border-radius:20px;font-size:11px;color:#4a5e4a}
+.text-secondary{color:#8ba88b;font-size:12px}
+.text-center{text-align:center}
+.mt-1{margin-top:4px}
+.mt-2{margin-top:8px}
+.mt-3{margin-top:12px}
+.mb-2{margin-bottom:8px}
+.flex{display:flex}
+.justify-between{justify-content:space-between}
+.items-center{align-items:center}
+.gap-2{gap:8px}
+.gap-3{gap:12px}
+.avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;object-fit:cover}
+.avatar-lg{width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:36px;margin-bottom:16px;object-fit:cover}
+.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0f4f0}
+.image-thumb img{width:100%;height:100%;object-fit:cover}
+.product-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.product-card{background:white;border-radius:16px;overflow:hidden;border:0.5px solid rgba(0,0,0,0.05);cursor:pointer}
+.product-image{width:100%;aspect-ratio:1;background:#f0f4f0;display:flex;align-items:center;justify-content:center;font-size:32px;color:#8ba88b}
+.product-image img{width:100%;height:100%;object-fit:cover}
+.product-info{padding:10px}
+.product-name{font-size:13px;font-weight:600;color:#1a2e1a;margin-bottom:4px}
+.product-price{font-size:14px;font-weight:700;color:#2d8c3c}
+.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal.show{display:flex}
+.modal-content{background:white;border-radius:24px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;z-index:1001}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:18px;font-weight:700;color:#1a2e1a}
+.modal-close{font-size:24px;cursor:pointer;color:#8ba88b;padding:8px}
+.hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
+.hamburger-menu.show{right:0}
+.menu-item{padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px;font-size:14px}
+.menu-item:hover{background:#f0f4f0}
+.menu-divider{height:1px;background:#e8ece8;margin:12px 0}
+.stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px}
+.stat-card{background:#f8faf8;border-radius:16px;padding:12px;text-align:center}
+.stat-value{font-size:24px;font-weight:800;color:#2d8c3c}
+.stat-label{font-size:11px;color:#8ba88b;margin-top:4px}
+.chart-container{background:white;border-radius:16px;padding:12px;margin-bottom:16px}
+.loading{text-align:center;padding:40px;color:#8ba88b}
+.loading i{font-size:32px;margin-bottom:12px;display:block}
+.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:12px;border-radius:30px;text-align:center;z-index:1000;font-size:13px}
+.input{width:100%;padding:12px 14px;border:1px solid #e0e8e0;border-radius:14px;font-size:14px;margin-bottom:12px;background:#f8faf8}
+.input:focus{outline:none;border-color:#2d8c3c}
+.tutorial-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px}
+.tutorial-card{background:white;border-radius:28px;max-width:400px;width:100%;padding:24px;animation:slideUp 0.3s ease}
+@keyframes slideUp{from{transform:translateY(50px);opacity:0}to{transform:translateY(0);opacity:1}}
+.tutorial-step{text-align:center}
+.tutorial-step .icon{font-size:56px;margin-bottom:16px}
+.tutorial-step h3{font-size:22px;color:#1a2e1a;margin-bottom:8px}
+.tutorial-step p{color:#6b8c6b;font-size:14px;margin-bottom:16px}
+.tutorial-dots{display:flex;justify-content:center;gap:8px;margin:20px 0}
+.tutorial-dot{width:8px;height:8px;background:#e0e8e0;border-radius:50%;cursor:pointer}
+.tutorial-dot.active{background:#2d8c3c;width:24px;border-radius:12px}
+.minimap-modal .modal-content{padding:0;overflow:hidden}
+.minimap-modal .map-container{height:400px;border-radius:0}
+.minimap-modal .modal-header{padding:16px;margin:0}
+.nav-btn{background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#2d8c3c}
+.profile-edit-avatar{position:relative;display:inline-block;cursor:pointer}
+.profile-edit-overlay{position:absolute;bottom:0;right:0;background:#2d8c3c;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:white;font-size:12px}
+.upload-area{background:#f8faf8;border:1px dashed #c0d0c0;border-radius:16px;padding:16px;text-align:center;cursor:pointer;margin:12px 0}
+.image-preview{width:70px;height:70px;border-radius:8px;overflow:hidden}
+.image-preview img{width:100%;height:100%;object-fit:cover}
+.product-images-container{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.leaflet-control-container .leaflet-top.leaflet-right{z-index:10}
+.leaflet-popup{z-index:20}
+.leaflet-control-attribution{z-index:10}
+.leaflet-control-zoom{z-index:20}
+.leaflet-control-container{position:relative;z-index:1}
+</style>
+
+<div class="app-bar">
+    <button class="back-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i></button>
+    <div class="app-bar-title">Lako</div>
+    <button class="menu-btn" onclick="toggleMenu()"><i class="fas fa-bars"></i></button>
+</div>
+
+<div id="hamburgerMenu" class="hamburger-menu">
+    <div class="menu-item" onclick="showAnalytics()"><i class="fas fa-chart-line"></i> My Activity</div>
+    <div class="menu-item" onclick="showTutorial()"><i class="fas fa-question-circle"></i> Tutorial</div>
+    <div class="menu-divider"></div>
+    <div class="menu-item" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
+</div>
+
+<div class="bottom-nav">
+    <div class="nav-item active" onclick="showPage('map')"><i class="fas fa-map"></i><span>Map</span></div>
+    <div class="nav-item" onclick="showPage('vendors')"><i class="fas fa-store"></i><span>Vendors</span></div>
+    <div class="nav-item" onclick="showPage('products')"><i class="fas fa-search"></i><span>Products</span></div>
+    <div class="nav-item" onclick="showPage('feed')"><i class="fas fa-newspaper"></i><span>Feed</span></div>
+    <div class="nav-item" onclick="showPage('profile')"><i class="fas fa-user"></i><span>Profile</span></div>
+</div>
+
+<div class="content" id="content"></div>
+
+<!-- Vendor Modal -->
+<div class="modal" id="vendorModal" onclick="if(event.target===this)closeModal()">
+    <div class="modal-content">
+        <div class="modal-header"><h3 id="modalTitle"></h3><span class="modal-close" onclick="closeModal()">&times;</span></div>
+        <div id="modalBody"></div>
+    </div>
+</div>
+
+<!-- Minimap Modal -->
+<div class="modal minimap-modal" id="minimapModal" onclick="if(event.target===this)closeMinimap()">
+    <div class="modal-content">
+        <div class="modal-header"><h3><i class="fas fa-directions"></i> Navigation</h3><span class="modal-close" onclick="closeMinimap()">&times;</span></div>
+        <div class="map-container" id="minimapContainer" style="height:400px"></div>
+        <div class="flex justify-between items-center gap-2 p-3">
+            <button class="btn-outline btn-sm" onclick="centerMinimapOnUser()"><i class="fas fa-location-dot"></i> My Location</button>
+            <button class="btn btn-sm" onclick="openExternalMaps()"><i class="fas fa-external-link-alt"></i> Open Maps</button>
+        </div>
+    </div>
+</div>
+
+<!-- Post Modal -->
+<div class="modal" id="postModal">
+    <div class="modal-content">
+        <div class="modal-header"><h3>Share Your Experience</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div>
+        <textarea id="postContent" class="input" placeholder="What's your favorite food today?" rows="4"></textarea>
+        <div class="upload-area" onclick="document.getElementById('postImages').click()">
+            <i class="fas fa-camera" style="font-size:24px;color:#2d8c3c"></i>
+            <div style="font-size:12px;margin-top:4px">Add Photos</div>
+        </div>
+        <input type="file" id="postImages" multiple accept="image/*" style="display:none" onchange="previewPostImages(this)">
+        <div id="postImagePreview" class="product-images-container"></div>
+        <button class="btn mt-2" onclick="createPost()"><i class="fas fa-paper-plane"></i> Post</button>
+    </div>
+</div>
+
+<!-- Profile Modal -->
+<div class="modal" id="profileModal">
+    <div class="modal-content">
+        <div class="modal-header"><h3>Edit Profile</h3><span class="modal-close" onclick="closeProfileModal()">&times;</span></div>
+        <div class="text-center mb-3">
+            <div class="profile-edit-avatar" style="display:inline-block" onclick="document.getElementById('profilePhotoInput').click()">
+                <img id="profileAvatarPreview" src="" class="avatar-lg" style="object-fit:cover;width:80px;height:80px;border-radius:50%">
+                <div class="profile-edit-overlay"><i class="fas fa-camera"></i></div>
+            </div>
+            <input type="file" id="profilePhotoInput" accept="image/*" style="display:none" onchange="updateProfilePhoto(this)">
+        </div>
+        <input type="text" id="profileName" class="input" placeholder="Your name">
+        <input type="tel" id="profilePhone" class="input" placeholder="Phone number">
+        <button class="btn" onclick="saveProfile()"><i class="fas fa-save"></i> Save Changes</button>
+    </div>
+</div>
+
+<!-- Product View Modal -->
+<div class="modal" id="productViewModal">
+    <div class="modal-content">
+        <div class="modal-header"><h3 id="productViewTitle"></h3><span class="modal-close" onclick="closeProductViewModal()">&times;</span></div>
+        <div id="productViewBody"></div>
+        <button class="btn mt-3" onclick="goToVendorFromProduct()"><i class="fas fa-store"></i> Visit Vendor Page</button>
+    </div>
+</div>
+
+<!-- Analytics Modal -->
+<div class="modal" id="analyticsModal">
+    <div class="modal-content">
+        <div class="modal-header"><h3>Your Activity</h3><span class="modal-close" onclick="closeAnalyticsModal()">&times;</span></div>
+        <div id="analyticsContent"></div>
+    </div>
+</div>
+
+<!-- Tutorial Modal -->
+<div id="tutorialModal" class="tutorial-overlay" style="display:none">
+    <div class="tutorial-card">
+        <div id="tutorialContent"></div>
+    </div>
+</div>
+
+<script>
+let sessionToken = localStorage.getItem('session_token');
+let userLocation = null, allVendors = [], allProducts = [], savedVendors = [], followedVendors = [], followedUsers = [];
+let page = 'map', map = null, minimap = null, minimapRouting = null;
+let heatLayer = null, fenceLayer = null, markerCluster = null;
+let heatActive = false, fenceActive = false;
+let userPreferences = {categories: [], priceMin: 0, priceMax: 500, maxDistance: 10};
+let currentVendorForProduct = null;
+
+// Check session immediately
+if (!sessionToken) {
+    window.location.href = '/auth';
+}
+
+const CATEGORIES = ["Coffee","Pancit","Tusok Tusok","Contemporary Street food","Bread and Pastry","Lomi","Beverage","Sarisari Store","Karendirya","Traditional Desserts","Contemporary Desserts","Squidball","Siomai","Siopao","Taho","Balut and other poultry","Corn","Fruit shakes","Fruit Juice"];
+
+function showToast(msg){
+    let t=document.querySelector('.toast');
+    if(t)t.remove();
+    t=document.createElement('div');
+    t.className='toast';
+    t.innerHTML='<i class="fas fa-info-circle"></i> '+msg;
+    document.body.appendChild(t);
+    setTimeout(()=>t.remove(),3000);
+}
+
+async function api(url, options = {}) {
+    if (!sessionToken && !url.includes('/auth/')) {
+        console.log('No session token, redirecting');
+        window.location.href = '/auth';
+        return null;
+    }
+    
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
+    };
+    
+    if (sessionToken) {
+        headers['X-Session-Token'] = sessionToken;
+    }
+    
+    try {
+        const res = await fetch(url, {
+            ...options,
+            headers: headers
+        });
+        
+        if (res.status === 401) {
+            console.log('401 Unauthorized, clearing session');
+            localStorage.clear();
+            window.location.href = '/auth';
+            return null;
+        }
+        
+        return res.json();
+    } catch (e) {
+        console.error('API error:', e);
+        return null;
+    }
+}
+
+async function loadData() {
+    if (!sessionToken) return;
+    
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(p => {
+            userLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
+            loadVendorsAndProducts();
+        }, () => {
+            userLocation = { lat: 14.5995, lng: 120.9842 };
+            loadVendorsAndProducts();
+        });
+    } else {
+        userLocation = { lat: 14.5995, lng: 120.9842 };
+        loadVendorsAndProducts();
+    }
+    loadSaved();
+    loadFollows();
+    loadUserPreferences();
+}
+
+async function loadVendorsAndProducts() {
+    const data = await api(`/api/customer/map/vendors?lat=${userLocation.lat}&lng=${userLocation.lng}`);
+    if (data && data.vendors) {
+        allVendors = data.vendors;
+        allProducts = [];
+        for (let vendor of allVendors) {
+            const productsRes = await api(`/api/customer/products/${vendor.id}`);
+            const products = productsRes?.products || [];
+            for (let product of products) {
+                product.vendor = vendor;
+                allProducts.push(product);
+            }
+        }
+        if (page === 'map') showMap();
+        else if (page === 'vendors') showVendors();
+        else if (page === 'products') showProducts();
+    }
+}
+
+async function loadSaved() {
+    const data = await api('/api/customer/shortlist');
+    if (data) { savedVendors = data.vendors || []; }
+}
+
+async function loadFollows() {
+    const data = await api('/api/customer/follows');
+    if (data) { followedVendors = data.vendors || []; followedUsers = data.users || []; }
+}
+
+async function loadUserPreferences() {
+    const data = await api('/api/customer/preferences');
+    if (data) { userPreferences = data; }
+}
+
+async function updateLocation() {
+    if (navigator.geolocation && userLocation) {
+        navigator.geolocation.getCurrentPosition(async p => {
+            userLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
+            await api('/api/customer/update-location', { method: 'POST', body: JSON.stringify(userLocation) });
+        });
+    }
+}
+setInterval(updateLocation, 30000);
+updateLocation();
+
+function showPage(p) {
+    page = p;
+    document.querySelectorAll('.nav-item').forEach((el, i) => {
+        const pages = ['map', 'vendors', 'products', 'feed', 'profile'];
+        el.classList.toggle('active', pages[i] === p);
+    });
+    if (p === 'map') showMap();
+    else if (p === 'vendors') showVendors();
+    else if (p === 'products') showProducts();
+    else if (p === 'feed') showFeed();
+    else if (p === 'profile') showProfile();
+}
+
+function showMap() {
+    document.getElementById('content').innerHTML = `
+        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="searchBox" placeholder="Search vendors..." oninput="filterMarkers()"></div>
+        <div class="map-wrapper"><div class="map-container"><div id="map"></div><div class="map-controls"><button class="map-control-btn" onclick="centerOnUser()"><i class="fas fa-location-dot"></i></button><button class="map-control-btn" id="heatBtn" onclick="toggleHeatmap()"><i class="fas fa-fire"></i></button><button class="map-control-btn" id="fenceBtn" onclick="toggleGeofence()"><i class="fas fa-circle"></i></button><button class="map-control-btn" id="clusterBtn" onclick="toggleCluster()"><i class="fas fa-layer-group"></i></button></div></div></div>
+        <div class="flex justify-between items-center mb-2"><h4><i class="fas fa-store"></i> Nearby</h4><span class="text-secondary">${allVendors.length} found</span></div>
+        <div id="nearbyList"></div>`;
+    
+    setTimeout(() => {
+        if (map) map.remove();
+        map = L.map('map').setView([userLocation.lat, userLocation.lng], 14);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+        }).addTo(map);
+        
+        markerCluster = L.markerClusterGroup();
+        allVendors.forEach(v => {
+            if (v.latitude && v.longitude) {
+                const marker = L.marker([v.latitude, v.longitude])
+                    .bindPopup(`<b>${v.business_name}</b><br>${v.category}<br><i class="fas fa-star" style="color:#ffb800"></i> ${v.rating || 'New'}`)
+                    .on('click', () => showVendorModal(v.id));
+                markerCluster.addLayer(marker);
+            }
+        });
+        map.addLayer(markerCluster);
+        updateNearbyList();
+    }, 100);
+}
+
+function filterMarkers() {
+    const query = document.getElementById('searchBox')?.value.toLowerCase() || '';
+    if (markerCluster) map.removeLayer(markerCluster);
+    markerCluster = L.markerClusterGroup();
+    allVendors.forEach(v => {
+        if (v.latitude && v.longitude && (v.business_name.toLowerCase().includes(query) || v.category.toLowerCase().includes(query))) {
+            const marker = L.marker([v.latitude, v.longitude]).bindPopup(`<b>${v.business_name}</b>`).on('click', () => showVendorModal(v.id));
+            markerCluster.addLayer(marker);
+        }
+    });
+    map.addLayer(markerCluster);
+}
+
+function updateNearbyList() {
+    const list = document.getElementById('nearbyList');
+    if (list) {
+        const sorted = [...allVendors].sort((a,b) => (a.distance || 999) - (b.distance || 999));
+        list.innerHTML = sorted.slice(0,10).map(v => `
+            <div class="card" onclick="showVendorModal('${v.id}')">
+                <div class="flex justify-between items-center">
+                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span></div>
+                    <div><div class="stars">${'★'.repeat(Math.floor(v.rating || 0))}</div><div class="text-secondary">${v.distance ? v.distance + 'km' : ''}</div></div>
+                </div>
+            </div>
+        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors nearby</div>';
+    }
+}
+
+function showVendors() {
+    document.getElementById('content').innerHTML = `
+        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="vendorSearch" placeholder="Search vendors..." oninput="filterVendorList()"></div>
+        <div class="filter-chips" id="categoryFilters">${CATEGORIES.slice(0,8).map(c => `<div class="chip" onclick="filterByCategory('${c}')">${c}</div>`).join('')}<div class="chip" onclick="filterByCategory('all')">All</div></div>
+        <div id="vendorList"></div>`;
+    filterVendorList();
+}
+
+let activeCategory = 'all';
+
+function filterByCategory(cat) {
+    activeCategory = cat;
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    if (cat !== 'all') event.target.classList.add('active');
+    filterVendorList();
+}
+
+function filterVendorList() {
+    const query = document.getElementById('vendorSearch')?.value.toLowerCase() || '';
+    let filtered = allVendors.filter(v => v.business_name.toLowerCase().includes(query) || v.category.toLowerCase().includes(query));
+    if (activeCategory !== 'all') filtered = filtered.filter(v => v.category === activeCategory);
+    document.getElementById('vendorList').innerHTML = filtered.map(v => `
+        <div class="card" onclick="showVendorModal('${v.id}')">
+            <div class="flex justify-between items-center">
+                <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating || 0))}</div></div>
+                <span class="vendor-status ${v.is_open ? 'open' : 'closed'}">${v.is_open ? 'Open' : 'Closed'}</span>
+            </div>
+        </div>
+    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors found</div>';
+}
+
+function showProducts() {
+    document.getElementById('content').innerHTML = `
+        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="productSearch" placeholder="Search products..." oninput="filterProductList()"></div>
+        <div class="filter-chips" id="productCategoryFilters">${CATEGORIES.slice(0,8).map(c => `<div class="chip" onclick="filterProductByCategory('${c}')">${c}</div>`).join('')}<div class="chip" onclick="filterProductByCategory('all')">All</div></div>
+        <div id="productList" class="product-grid"></div>`;
+    filterProductList();
+}
+
+let activeProductCategory = 'all';
+
+function filterProductByCategory(cat) {
+    activeProductCategory = cat;
+    document.querySelectorAll('#productCategoryFilters .chip').forEach(c => c.classList.remove('active'));
+    if (cat !== 'all') event.target.classList.add('active');
+    filterProductList();
+}
+
+function filterProductList() {
+    const query = document.getElementById('productSearch')?.value.toLowerCase() || '';
+    let filtered = allProducts.filter(p => p.name.toLowerCase().includes(query) || (p.category && p.category.toLowerCase().includes(query)));
+    if (activeProductCategory !== 'all') filtered = filtered.filter(p => p.category === activeProductCategory);
+    if (userPreferences.categories.length > 0 && activeProductCategory === 'all') {
+        filtered = filtered.filter(p => userPreferences.categories.includes(p.category));
+    }
+    filtered = filtered.filter(p => p.price >= userPreferences.priceMin && p.price <= userPreferences.priceMax);
+    document.getElementById('productList').innerHTML = filtered.map(p => `
+        <div class="product-card" onclick="showProductModal('${p.id}', '${p.vendor.id}')">
+            <div class="product-image">${p.images && p.images[0] ? `<img src="${p.images[0].thumbnail}">` : '<i class="fas fa-utensils"></i>'}</div>
+            <div class="product-info">
+                <div class="product-name">${p.name}</div>
+                <div class="product-price">₱${p.price}</div>
+                <div class="text-secondary" style="font-size:10px">${p.vendor?.business_name || ''}</div>
+            </div>
+        </div>
+    `).join('') || '<div class="card text-center text-secondary col-span-2"><i class="fas fa-info-circle"></i> No products found</div>';
+}
+
+async function showProductModal(productId, vendorId) {
+    const product = allProducts.find(p => p.id === productId);
+    if (!product) return;
+    currentVendorForProduct = product.vendor;
+    document.getElementById('productViewTitle').innerHTML = `<i class="fas fa-utensils"></i> ${product.name}`;
+    document.getElementById('productViewBody').innerHTML = `
+        <div class="text-center mb-3">${product.images && product.images[0] ? `<img src="${product.images[0].original}" style="width:100%;border-radius:16px;max-height:250px;object-fit:cover">` : '<div style="width:100%;height:150px;background:#f0f4f0;border-radius:16px;display:flex;align-items:center;justify-content:center"><i class="fas fa-utensils" style="font-size:48px;color:#8ba88b"></i></div>'}</div>
+        <div class="product-price text-center mb-2">₱${product.price}</div>
+        <p class="text-secondary">${product.description || 'No description available'}</p>
+        <div class="mt-3"><strong>Sold by:</strong> ${product.vendor?.business_name}</div>
+        <div class="stars mt-1">${'★'.repeat(Math.floor(product.vendor?.rating || 0))}</div>
+    `;
+    document.getElementById('productViewModal').classList.add('show');
+}
+
+function goToVendorFromProduct() {
+    if (currentVendorForProduct) {
+        closeProductViewModal();
+        showVendorModal(currentVendorForProduct.id);
+    }
+}
+
+async function showFeed() {
+    const data = await api('/api/customer/feed');
+    let posts = data?.posts || [];
+    document.getElementById('content').innerHTML = `
+        <button class="btn" onclick="openPostModal()"><i class="fas fa-plus"></i> Share Your Experience</button>
+        <div id="feedList" class="mt-3"></div>`;
+    document.getElementById('feedList').innerHTML = posts.slice(0,30).map(p => `
+        <div class="card">
+            <div class="flex items-center gap-3">
+                <div class="avatar" style="background:#f0f4f0;color:#2d8c3c"><i class="fas fa-user-circle"></i></div>
+                <div><strong>${p.author || 'User'}</strong><br><span class="text-secondary"><i class="far fa-clock"></i> ${timeAgo(p.created_at)}</span></div>
+                <div class="flex-1"></div>
+                <button class="nav-btn" onclick="followUser('${p.user_id}')"><i class="fas fa-user-plus"></i></button>
             </div>
             <p class="mt-2">${p.content}</p>
             ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail}"></div>`).join('')}</div>` : ''}
             <div class="flex gap-3 mt-3">
                 <button class="btn-outline btn-sm" onclick="likePost('${p.id}')"><i class="far fa-heart"></i> ${p.likes || 0}</button>
-                <button class="btn-outline btn-sm" onclick="alert('Comments coming soon!')"><i class="far fa-comment"></i> ${p.comment_count || 0}</button>
+                <button class="btn-outline btn-sm" onclick="commentOnPost('${p.id}')"><i class="far fa-comment"></i> ${p.comment_count || 0}</button>
             </div>
         </div>
     `).join('');
 }
 
-async function likePost(postId) { await api('/api/customer/like', { method: 'POST', body: JSON.stringify({ post_id: postId }) }); showFeed(); }
-
-function showSaved() {
-    document.getElementById('content').innerHTML = savedVendors.map(v => `
-        <div class="card" onclick="showVendorModal('${v.id}')">
-            <div class="flex justify-between items-center">
-                <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span></div>
-                <button class="btn-outline btn-sm" onclick="event.stopPropagation(); toggleSave('${v.id}')"><i class="fas fa-trash"></i> Remove</button>
-            </div>
-        </div>
-    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-bookmark"></i> No saved vendors yet.<br>Tap the bookmark icon on a vendor to save them!</div>';
+function timeAgo(date) {
+    const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+    if (seconds < 60) return seconds + 's ago';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + 'm ago';
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + 'h ago';
+    return Math.floor(hours / 24) + 'd ago';
 }
 
-function showProfile() {
+async function likePost(postId) { await api('/api/customer/like', { method: 'POST', body: JSON.stringify({ post_id: postId }) }); showFeed(); }
+async function commentOnPost(postId) { let comment = prompt('Write a comment:'); if(comment) await api('/api/customer/comment', { method: 'POST', body: JSON.stringify({ post_id: postId, comment }) }); showFeed(); }
+async function followUser(userId) { await api('/api/customer/follow', { method: 'POST', body: JSON.stringify({ user_id: userId }) }); showToast('Followed!'); showFeed(); }
+
+async function showProfile() {
+    const profile = await api('/api/customer/profile');
     document.getElementById('content').innerHTML = `
         <div class="card text-center">
-            <div class="avatar-lg mx-auto"><i class="fas fa-user-circle"></i></div>
-            <h3 class="mt-2">Food Explorer</h3>
-            <p class="text-secondary"><i class="fas fa-calendar-alt"></i> Customer since ${new Date().getFullYear()}</p>
-            <div class="stats-grid mt-4">
-                <div class="stat-card"><div class="stat-value">${savedVendors.length}</div><div class="stat-label">Saved</div></div>
-                <div class="stat-card"><div class="stat-value">-</div><div class="stat-label">Reviews</div></div>
+            <div class="profile-edit-avatar" style="display:inline-block;cursor:pointer" onclick="openProfileModal()">
+                ${profile?.profile_photo ? `<img src="${profile.profile_photo}" class="avatar-lg" style="object-fit:cover;width:80px;height:80px;border-radius:50%">` : `<div class="avatar-lg" style="margin:0 auto"><i class="fas fa-user-circle"></i></div>`}
+                <div class="profile-edit-overlay"><i class="fas fa-camera"></i></div>
             </div>
-            <button class="btn-outline mt-4" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</button>
+            <h3 id="profileNameDisplay" class="mt-2">${profile?.full_name || 'Food Explorer'}</h3>
+            <p class="text-secondary"><i class="fas fa-phone"></i> ${profile?.phone || 'No phone'}</p>
+            <p class="text-secondary"><i class="fas fa-envelope"></i> ${profile?.email || ''}</p>
+            <div class="stats-grid mt-3">
+                <div class="stat-card"><div class="stat-value">${savedVendors.length}</div><div class="stat-label">Saved</div></div>
+                <div class="stat-card"><div class="stat-value">${followedVendors.length}</div><div class="stat-label">Following</div></div>
+            </div>
+            <button class="btn-outline mt-3" onclick="openProfileModal()"><i class="fas fa-edit"></i> Edit Profile</button>
+            <button class="btn-outline mt-2" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</button>
         </div>`;
+}
+
+async function openProfileModal() {
+    const profile = await api('/api/customer/profile');
+    document.getElementById('profileName').value = profile?.full_name || '';
+    document.getElementById('profilePhone').value = profile?.phone || '';
+    if (profile?.profile_photo) {
+        document.getElementById('profileAvatarPreview').src = profile.profile_photo;
+    }
+    document.getElementById('profileModal').classList.add('show');
+}
+
+async function updateProfilePhoto(input) {
+    if (input.files && input.files[0]) {
+        const file = input.files[0];
+        if (file.size > 5 * 1024 * 1024) { showToast('File too large. Max 5MB'); return; }
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            const res = await api('/api/customer/update-profile-photo', { method: 'POST', body: JSON.stringify({ photo: e.target.result }) });
+            if (res && res.success) {
+                showToast('Profile photo updated!');
+                showProfile();
+                closeProfileModal();
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+async function saveProfile() {
+    const name = document.getElementById('profileName').value;
+    const phone = document.getElementById('profilePhone').value;
+    const res = await api('/api/customer/update-profile', { method: 'POST', body: JSON.stringify({ full_name: name, phone: phone }) });
+    if (res && res.success) {
+        showToast('Profile updated!');
+        closeProfileModal();
+        showProfile();
+    }
 }
 
 async function showAnalytics() {
     const data = await api('/api/customer/analytics');
     document.getElementById('analyticsContent').innerHTML = `
         <div class="stats-grid">
-            <div class="stat-card"><div class="stat-value">${data.total_visits || 0}</div><div class="stat-label">Vendors Visited</div></div>
-            <div class="stat-card"><div class="stat-value">${data.reviews_written || 0}</div><div class="stat-label">Reviews Written</div></div>
-            <div class="stat-card"><div class="stat-value">${data.posts_created || 0}</div><div class="stat-label">Posts Created</div></div>
-            <div class="stat-card"><div class="stat-value">${data.likes_given || 0}</div><div class="stat-label">Likes Given</div></div>
+            <div class="stat-card"><div class="stat-value">${data?.total_visits || 0}</div><div class="stat-label">Vendors Visited</div></div>
+            <div class="stat-card"><div class="stat-value">${data?.reviews_written || 0}</div><div class="stat-label">Reviews</div></div>
+            <div class="stat-card"><div class="stat-value">${data?.posts_created || 0}</div><div class="stat-label">Posts</div></div>
+            <div class="stat-card"><div class="stat-value">${data?.likes_given || 0}</div><div class="stat-label">Likes</div></div>
         </div>
         <div class="chart-container"><canvas id="activityChart"></canvas></div>`;
     document.getElementById('analyticsModal').classList.add('show');
     setTimeout(() => {
         new Chart(document.getElementById('activityChart'), {
             type: 'bar',
-            data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [{ label: 'Activity', data: data.weekly_activity || [5, 8, 12, 15, 20, 25, 18], backgroundColor: '#2d8c3c', borderRadius: 8 }] },
+            data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [{ label: 'Activity', data: data?.weekly_activity || [5, 8, 12, 15, 20, 25, 18], backgroundColor: '#2d8c3c', borderRadius: 6 }] },
             options: { responsive: true, maintainAspectRatio: true }
         });
     }, 100);
@@ -2488,32 +3197,30 @@ async function showVendorModal(vendorId) {
     const v = allVendors.find(v => v.id === vendorId);
     if (!v) return;
     const isSaved = savedVendors.some(sv => sv.id === v.id);
-    
-    const productsRes = await api(`/api/customer/products/${vendorId}`);
-    const products = productsRes.products || productsRes || [];
+    const isFollowed = followedVendors.some(fv => fv.id === vendorId);
+    const products = allProducts.filter(p => p.vendor?.id === vendorId);
     
     document.getElementById('modalTitle').innerHTML = `<i class="fas fa-store"></i> ${v.business_name}`;
     document.getElementById('modalBody').innerHTML = `
-        <p><span class="badge"><i class="fas fa-tag"></i> ${v.category}</span> <span class="vendor-status ${v.is_open ? 'open' : 'closed'}"><i class="fas ${v.is_open ? 'fa-clock' : 'fa-clock'}"></i> ${v.is_open ? 'Open Now' : 'Closed'}</span></p>
+        <p><span class="badge">${v.category}</span> <span class="vendor-status ${v.is_open ? 'open' : 'closed'}">${v.is_open ? 'Open Now' : 'Closed'}</span></p>
         <p><i class="fas fa-map-marker-alt"></i> ${v.address || 'No address'}</p>
         <p><i class="fas fa-star" style="color:#ffb800;"></i> ${v.rating || 'New'} (${v.review_count || 0} reviews)</p>
-        <p><i class="fas fa-phone"></i> ${v.phone || 'No phone'}</p>
-        <div class="mt-4"><strong><i class="fas fa-utensils"></i> Menu</strong></div>
+        <div class="flex gap-2 mt-2">
+            <button class="btn-outline btn-sm" onclick="followVendor('${v.id}')"><i class="fas ${isFollowed ? 'fa-check-circle' : 'fa-bell'}"></i> ${isFollowed ? 'Following' : 'Follow'}</button>
+            <button class="btn-outline btn-sm" onclick="toggleSave('${v.id}')"><i class="fas ${isSaved ? 'fa-bookmark' : 'fa-bookmark'}"></i> ${isSaved ? 'Saved' : 'Save'}</button>
+            <button class="btn-outline btn-sm" onclick="openMinimap(${v.latitude}, ${v.longitude}, '${v.business_name}')"><i class="fas fa-map"></i> Map</button>
+        </div>
+        <div class="mt-3"><strong><i class="fas fa-utensils"></i> Menu</strong></div>
         <div id="menuItems">${products.map(p => `
-            <div class="menu-item">
-                ${p.images && p.images[0] ? `<div class="menu-item-image"><img src="${p.images[0].thumbnail}"></div>` : `<div class="menu-item-image"><i class="fas fa-utensils"></i></div>`}
-                <div class="menu-item-info">
-                    <div class="menu-item-name">${p.name}</div>
-                    <div class="menu-item-price">₱${p.price}</div>
-                    ${p.description ? `<div class="text-secondary"><i class="fas fa-info-circle"></i> ${p.description}</div>` : ''}
+            <div class="menu-item" style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #e8ece8;cursor:pointer" onclick="showProductModal('${p.id}', '${v.id}')">
+                ${p.images && p.images[0] ? `<div style="width:60px;height:60px;border-radius:12px;overflow:hidden"><img src="${p.images[0].thumbnail}" style="width:100%;height:100%;object-fit:cover"></div>` : `<div style="width:60px;height:60px;border-radius:12px;background:#f0f4f0;display:flex;align-items:center;justify-content:center"><i class="fas fa-utensils"></i></div>`}
+                <div class="flex-1">
+                    <div class="menu-item-name" style="font-weight:600">${p.name}</div>
+                    <div class="menu-item-price" style="color:#2d8c3c;font-weight:700">₱${p.price}</div>
                 </div>
             </div>
-        `).join('') || '<p class="text-secondary"><i class="fas fa-info-circle"></i> No menu items yet</p>'}</div>
-        <div class="flex gap-2 mt-4">
-            <button class="btn" onclick="navigateTo(${v.latitude}, ${v.longitude})"><i class="fas fa-directions"></i> Navigate</button>
-            <button class="btn-outline" onclick="toggleSave('${v.id}')"><i class="fas ${isSaved ? 'fa-bookmark' : 'fa-bookmark'}"></i> ${isSaved ? 'Saved' : 'Save'}</button>
-        </div>
-        <button class="btn-outline mt-2" onclick="writeReview('${v.id}')"><i class="fas fa-star"></i> Write a Review</button>
+        `).join('') || '<p class="text-secondary">No menu items yet</p>'}</div>
+        <button class="btn-outline mt-3" onclick="writeReview('${v.id}')"><i class="fas fa-star"></i> Write a Review</button>
         <div id="reviewsList" class="mt-3"></div>`;
     document.getElementById('vendorModal').classList.add('show');
     loadVendorReviews(vendorId);
@@ -2522,94 +3229,92 @@ async function showVendorModal(vendorId) {
 async function loadVendorReviews(vendorId) {
     const data = await api(`/api/customer/reviews/${vendorId}`);
     const reviewsDiv = document.getElementById('reviewsList');
-    if (data.reviews && data.reviews.length) {
-        reviewsDiv.innerHTML = `<strong><i class="fas fa-comments"></i> Recent Reviews</strong>` + data.reviews.slice(0,3).map(r => `
-            <div class="mt-2 pt-2" style="border-top:1px solid #e8ece8"><div class="stars">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div><p class="text-secondary">${r.comment || 'No comment'}</p><small class="text-secondary">${new Date(r.created_at).toLocaleDateString()}</small></div>
+    if (data?.reviews && data.reviews.length) {
+        reviewsDiv.innerHTML = `<strong><i class="fas fa-comments"></i> Reviews</strong>` + data.reviews.slice(0,3).map(r => `
+            <div class="mt-2 pt-2" style="border-top:1px solid #e8ece8"><div class="stars">${'★'.repeat(r.rating)}</div><p class="text-secondary">${r.comment || ''}</p><small>${new Date(r.created_at).toLocaleDateString()}</small></div>
         `).join('');
     }
 }
 
+async function followVendor(vendorId) {
+    const res = await api('/api/customer/follow-vendor', { method: 'POST', body: JSON.stringify({ vendor_id: vendorId }) });
+    await loadFollows();
+    showToast(res?.action === 'followed' ? 'Following vendor!' : 'Unfollowed vendor');
+    closeModal();
+    showVendorModal(vendorId);
+}
+
 async function toggleSave(vendorId) {
     await api('/api/customer/shortlist/toggle', { method: 'POST', body: JSON.stringify({ vendor_id: vendorId }) });
-    await loadSaved(); 
+    await loadSaved();
+    showToast('Updated saved vendors');
     closeModal();
-    showToast(isSaved ? 'Removed from saved' : 'Added to saved');
 }
 
 async function writeReview(vendorId) {
-    const rating = prompt('Rate this vendor (1-5 stars):');
+    const rating = prompt('Rate (1-5 stars):');
     if (rating && rating >= 1 && rating <= 5) {
-        const comment = prompt('Write your review (optional):');
+        const comment = prompt('Your review:');
         await api('/api/customer/review/create', { method: 'POST', body: JSON.stringify({ vendor_id: vendorId, rating: parseInt(rating), comment }) });
         showToast('Thank you for your review!');
         closeModal();
     }
 }
 
-function navigateTo(lat, lng) { 
-    closeModal(); 
-    showPage('map'); 
-    setTimeout(() => { 
-        if (map) {
-            map.setView([lat, lng], 16);
-            showToast('Route ready!');
+function openMinimap(lat, lng, name) {
+    document.getElementById('minimapModal').classList.add('show');
+    setTimeout(() => {
+        if (minimap) minimap.remove();
+        minimap = L.map('minimapContainer').setView([lat, lng], 15);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(minimap);
+        L.marker([lat, lng]).bindPopup(`<b>${name}</b>`).addTo(minimap);
+        if (userLocation) {
+            L.marker([userLocation.lat, userLocation.lng]).bindPopup('<b>You are here</b>').addTo(minimap);
+            minimap.setView([(userLocation.lat + lat)/2, (userLocation.lng + lng)/2], 13);
+            if (minimapRouting) minimap.removeControl(minimapRouting);
+            minimapRouting = L.Routing.control({
+                waypoints: [L.latLng(userLocation.lat, userLocation.lng), L.latLng(lat, lng)],
+                routeWhileDragging: false,
+                lineOptions: { styles: [{ color: '#2d8c3c', weight: 4 }] },
+                createMarker: () => null
+            }).addTo(minimap);
         }
-    }, 100); 
+    }, 100);
 }
 
-function centerOnUser() { 
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(p => {
-            userLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
-            if (map) map.setView([userLocation.lat, userLocation.lng], 15);
-            loadVendors();
-            showToast('Recentered on your location');
-        });
-    } else if (map && userLocation) map.setView([userLocation.lat, userLocation.lng], 15);
+function centerMinimapOnUser() {
+    if (userLocation && minimap) minimap.setView([userLocation.lat, userLocation.lng], 15);
 }
 
-function toggleHeatmap() {
-    heatActive = !heatActive;
-    const btn = document.getElementById('heatBtn');
-    if (heatActive) {
-        const points = allVendors.filter(v => v.latitude).map(v => [v.latitude, v.longitude, 0.5]);
-        heatLayer = L.heatLayer(points, { radius: 25, blur: 15 }).addTo(map);
-        btn.style.background = '#2d8c3c';
-        btn.style.color = 'white';
-        showToast('Heatmap enabled');
-    } else {
-        if (heatLayer) map.removeLayer(heatLayer);
-        btn.style.background = 'white';
-        btn.style.color = '#2d8c3c';
-        showToast('Heatmap disabled');
+function openExternalMaps() {
+    if (minimapRouting && minimapRouting.getWaypoints && minimapRouting.getWaypoints().length > 1) {
+        const dest = minimapRouting.getWaypoints()[1].latLng;
+        window.open(`https://www.google.com/maps/dir/${userLocation.lat},${userLocation.lng}/${dest.lat},${dest.lng}`, '_blank');
     }
 }
 
-function toggleGeofence() {
-    fenceActive = !fenceActive;
-    const btn = document.getElementById('fenceBtn');
-    if (fenceActive) {
-        fenceLayer = L.circle([userLocation.lat, userLocation.lng], { radius: 3000, color: '#2d8c3c', fillColor: '#2d8c3c', fillOpacity: 0.08 }).addTo(map);
-        btn.style.background = '#2d8c3c';
-        btn.style.color = 'white';
-        showToast('3km geofence enabled');
-    } else {
-        if (fenceLayer) map.removeLayer(fenceLayer);
-        btn.style.background = 'white';
-        btn.style.color = '#2d8c3c';
-        showToast('Geofence disabled');
-    }
-}
-
+function closeMinimap() { document.getElementById('minimapModal').classList.remove('show'); if(minimapRouting) minimap.removeControl(minimapRouting); }
+function centerOnUser() { if (map && userLocation) { map.setView([userLocation.lat, userLocation.lng], 15); showToast('Recentered'); } }
+function toggleHeatmap() { heatActive = !heatActive; const btn = document.getElementById('heatBtn'); if (heatActive) { const points = allVendors.filter(v => v.latitude).map(v => [v.latitude, v.longitude, 0.5]); heatLayer = L.heatLayer(points, { radius: 25 }).addTo(map); btn.style.background = '#2d8c3c'; btn.style.color = 'white'; showToast('Heatmap enabled'); } else { if (heatLayer) map.removeLayer(heatLayer); btn.style.background = 'white'; btn.style.color = '#2d8c3c'; showToast('Heatmap disabled'); } }
+function toggleGeofence() { fenceActive = !fenceActive; const btn = document.getElementById('fenceBtn'); if (fenceActive) { fenceLayer = L.circle([userLocation.lat, userLocation.lng], { radius: 3000, color: '#2d8c3c', fillColor: '#2d8c3c', fillOpacity: 0.05 }).addTo(map); btn.style.background = '#2d8c3c'; btn.style.color = 'white'; showToast('3km geofence enabled'); } else { if (fenceLayer) map.removeLayer(fenceLayer); btn.style.background = 'white'; btn.style.color = '#2d8c3c'; showToast('Geofence disabled'); } }
 function toggleCluster() { location.reload(); }
 
 function openPostModal() { document.getElementById('postModal').classList.add('show'); }
 function closePostModal() { document.getElementById('postModal').classList.remove('show'); }
 
+function previewPostImages(input) {
+    const previewDiv = document.getElementById('postImagePreview');
+    previewDiv.innerHTML = '';
+    for (let i = 0; i < input.files.length; i++) {
+        const reader = new FileReader();
+        reader.onload = e => { previewDiv.innerHTML += `<div class="image-preview"><img src="${e.target.result}" style="width:70px;height:70px;object-fit:cover;border-radius:8px"></div>`; };
+        reader.readAsDataURL(input.files[i]);
+    }
+}
+
 async function createPost() {
     const content = document.getElementById('postContent').value;
     if (!content) { showToast('Write something!'); return; }
-    
     const files = document.getElementById('postImages').files;
     const images = [];
     for (let file of files) {
@@ -2617,30 +3322,60 @@ async function createPost() {
         const imgData = await new Promise(resolve => { reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
         images.push(imgData);
     }
-    
-    await api('/api/customer/post/create', { method: 'POST', body: JSON.stringify({ content, images }) });
-    closePostModal(); 
-    document.getElementById('postContent').value = '';
-    document.getElementById('postImages').value = '';
-    showFeed();
-    showToast('Post shared!');
+    const res = await api('/api/customer/post/create', { method: 'POST', body: JSON.stringify({ content, images }) });
+    if (res && res.success) {
+        closePostModal();
+        document.getElementById('postContent').value = '';
+        document.getElementById('postImages').value = '';
+        document.getElementById('postImagePreview').innerHTML = '';
+        showFeed();
+        showToast('Post shared!');
+    } else {
+        showToast('Failed to create post');
+    }
 }
 
 function closeModal() { document.getElementById('vendorModal').classList.remove('show'); }
 function closeAnalyticsModal() { document.getElementById('analyticsModal').classList.remove('show'); }
+function closeProfileModal() { document.getElementById('profileModal').classList.remove('show'); }
+function closeProductViewModal() { document.getElementById('productViewModal').classList.remove('show'); }
 function toggleMenu() { document.getElementById('hamburgerMenu').classList.toggle('show'); }
-function showSettings() { showToast('Settings coming soon!'); toggleMenu(); }
+
+function showTutorial() {
+    const steps = [
+        { icon: "<i class='fas fa-map'></i>", title: "Welcome to Lako!", desc: "Discover the best street food vendors near you.", features: ["Real-time GPS vendor locations", "Browse menus with photos", "Save your favorites"] },
+        { icon: "<i class='fas fa-search'></i>", title: "Find Products", desc: "Search for specific food items from all vendors.", features: ["Filter by category", "Filter by price range", "Personalized recommendations"] },
+        { icon: "<i class='fas fa-newspaper'></i>", title: "Community Feed", desc: "See what others are saying about local food.", features: ["Follow vendors and users", "Like and comment on posts", "Relevant content first"] },
+        { icon: "<i class='fas fa-user'></i>", title: "Your Profile", desc: "Customize your experience and track your activity.", features: ["Upload profile photo", "View your saved vendors", "See your activity stats"] }
+    ];
+    let stepIndex = 0;
+    const modal = document.getElementById('tutorialModal');
+    const content = document.getElementById('tutorialContent');
+    function renderStep() {
+        const step = steps[stepIndex];
+        content.innerHTML = `<div class="tutorial-step"><div class="icon">${step.icon}</div><h3>${step.title}</h3><p>${step.desc}</p><div class="feature-list" style="text-align:left;background:#f8faf8;padding:16px;border-radius:20px;margin:16px 0">${step.features.map(f => `<li style="padding:8px 0;display:flex;align-items:center;gap:10px"><i class="fas fa-check-circle" style="color:#2d8c3c"></i> ${f}</li>`).join('')}</div><div class="tutorial-dots">${steps.map((_, i) => `<div class="tutorial-dot ${i === stepIndex ? 'active' : ''}" onclick="goToStep(${i})"></div>`).join('')}</div><div class="flex gap-2">${stepIndex > 0 ? '<button class="btn-outline" onclick="prevStep()">Back</button>' : ''}<button class="btn" onclick="${stepIndex === steps.length-1 ? 'closeTutorial()' : 'nextStep()'}">${stepIndex === steps.length-1 ? 'Get Started' : 'Next'}</button></div></div>`;
+    }
+    window.goToStep = (i) => { stepIndex = i; renderStep(); };
+    window.nextStep = () => { if(stepIndex < steps.length-1) { stepIndex++; renderStep(); } };
+    window.prevStep = () => { if(stepIndex > 0) { stepIndex--; renderStep(); } };
+    window.closeTutorial = () => { modal.style.display = 'none'; localStorage.setItem('tutorial_seen', 'true'); };
+    modal.style.display = 'flex';
+    renderStep();
+}
+
 function logout() { localStorage.clear(); window.location.href = '/'; }
 
-// Add Font Awesome and Leaflet
+// Load libraries
 let fa=document.createElement('link');fa.rel='stylesheet';fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';document.head.appendChild(fa);
 let leaflet=document.createElement('link');leaflet.rel='stylesheet';leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(leaflet);
-let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';document.head.appendChild(leafletScript);
+let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';leafletScript.onload=()=>{if(page==='map') setTimeout(showMap,100);};document.head.appendChild(leafletScript);
+let leafletRouting=document.createElement('script');leafletRouting.src='https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js';document.head.appendChild(leafletRouting);
 let leafletCluster=document.createElement('link');leafletCluster.rel='stylesheet';leafletCluster.href='https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css';document.head.appendChild(leafletCluster);
 let leafletClusterScript=document.createElement('script');leafletClusterScript.src='https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';document.head.appendChild(leafletClusterScript);
 let heatScript=document.createElement('script');heatScript.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js';document.head.appendChild(heatScript);
 let chartScript=document.createElement('script');chartScript.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';document.head.appendChild(chartScript);
 
+if(!localStorage.getItem('tutorial_seen')) setTimeout(showTutorial, 1000);
 loadData();
 </script>
 ''')
@@ -2657,8 +3392,8 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
 .app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
 .menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
-.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px)}
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05)}
+.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:80px}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05);z-index:99}
 .nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer;transition:all 0.2s}
 .nav-item i{font-size:22px}
 .nav-item.active{color:#2d8c3c}
@@ -2667,7 +3402,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .btn{width:100%;padding:14px;background:#2d8c3c;color:white;border:none;border-radius:44px;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.2s}
 .btn:active{transform:scale(0.97);background:#1a6b28}
 .btn-outline{background:white;border:1.5px solid #2d8c3c;color:#2d8c3c;padding:12px;border-radius:44px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}
-.btn-sm{padding:8px 16px;font-size:13px}
+.btn-sm{padding:8px 16px;font-size:13px;width:auto}
 .badge{background:#f0f4f0;padding:4px 12px;border-radius:20px;font-size:12px;color:#1a2e1a}
 .text-secondary{color:#8ba88b;font-size:13px}
 .text-center{text-align:center}
@@ -2683,13 +3418,12 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .gap-3{gap:12px}
 .gap-4{gap:16px}
 .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px}
-.stat-card{background:white;border-radius:20px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.stat-value{font-size:28px;font-weight:800;color:#2d8c3c}
-.stat-label{font-size:12px;color:#8ba88b;margin-top:4px}
+.stat-card{background:linear-gradient(135deg,#2d8c3c,#1a6b28);border-radius:20px;padding:16px;text-align:center;color:white}
+.stat-value{font-size:28px;font-weight:800}
+.stat-label{font-size:12px;opacity:0.9;margin-top:4px}
 .chart-container{background:white;border-radius:20px;padding:16px;margin-bottom:20px}
 .product-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
 .product-price{font-size:20px;font-weight:700;color:#2d8c3c}
-.product-stock{font-size:12px;color:#8ba88b}
 .image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0f4f0}
 .image-thumb img{width:100%;height:100%;object-fit:cover}
@@ -2702,7 +3436,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .hours-value{font-size:13px;color:#2d8c3c;font-weight:600}
 .modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
 .modal.show{display:flex}
-.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:80vh;overflow-y:auto;padding:24px}
+.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px}
 .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#1a2e1a}
 .modal-close{font-size:28px;cursor:pointer;color:#8ba88b}
 .hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
@@ -2722,6 +3456,49 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .image-preview{position:relative;width:80px;height:80px}
 .image-preview img{width:100%;height:100%;border-radius:8px;object-fit:cover}
 .remove-img{position:absolute;top:-8px;right:-8px;background:#e53935;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer}
+.map-container{height:280px;background:#e8ece8;border-radius:20px;margin:16px 0;border:1px solid #e0e8e0;position:relative;overflow:hidden}
+.location-badge{background:#f8faf8;border-radius:12px;padding:12px;margin:12px 0;display:flex;align-items:center;gap:12px;border:1px solid #e0e8e0}
+.location-badge i{color:#2d8c3c;font-size:18px}
+.location-text{flex:1;font-size:13px}
+.refresh-loc{background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer}
+.confirm-loc{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:40px;cursor:pointer;margin-top:12px}
+.stars{color:#ffb800;letter-spacing:2px}
+.post-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px}
+.post-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.post-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:20px}
+.post-content{font-size:14px;color:#1a2e1a;margin-bottom:12px;line-height:1.5}
+.post-images{display:flex;gap:8px;margin-bottom:12px;overflow-x:auto}
+.post-image{width:100px;height:100px;border-radius:12px;object-fit:cover}
+.post-stats{display:flex;gap:16px;margin-top:8px;padding-top:8px;border-top:1px solid #e8ece8}
+.post-stats span{font-size:12px;color:#8ba88b}
+.heatmap-container{height:200px;background:#e8ece8;border-radius:16px;margin:16px 0;position:relative}
+.open-toggle{display:flex;align-items:center;justify-content:space-between;padding:12px;background:#f8faf8;border-radius:20px;margin-bottom:16px}
+.open-toggle label{font-weight:600;color:#1a2e1a}
+.open-toggle .toggle-switch{position:relative;display:inline-block;width:52px;height:26px}
+.open-toggle .toggle-switch input{opacity:0;width:0;height:0}
+.open-toggle .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#ccc;transition:0.3s;border-radius:26px}
+.open-toggle .slider:before{position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;background-color:white;transition:0.3s;border-radius:50%}
+.open-toggle input:checked+.slider{background-color:#2d8c3c}
+.open-toggle input:checked+.slider:before{transform:translateX(26px)}
+.open-status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.open-status.open{background:#e8f5e9;color:#2d8c3c}
+.open-status.closed{background:#ffebee;color:#e53935}
+.tutorial-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px}
+.tutorial-card{background:white;border-radius:32px;max-width:400px;width:100%;padding:28px;animation:slideUp 0.3s ease}
+@keyframes slideUp{from{transform:translateY(50px);opacity:0}to{transform:translateY(0);opacity:1}}
+.tutorial-step{text-align:center}
+.tutorial-step .icon{font-size:64px;margin-bottom:16px}
+.tutorial-step h3{font-size:24px;color:#1a2e1a;margin-bottom:8px}
+.tutorial-step p{color:#6b8c6b;font-size:14px;line-height:1.5;margin-bottom:20px}
+.tutorial-step .feature-list{text-align:left;background:#f8faf8;padding:16px;border-radius:20px;margin:16px 0}
+.tutorial-step .feature-list li{padding:8px 0;display:flex;align-items:center;gap:10px;font-size:13px;color:#1a2e1a}
+.tutorial-step .feature-list li i{width:24px;color:#2d8c3c}
+.tutorial-dots{display:flex;justify-content:center;gap:8px;margin:20px 0}
+.tutorial-dot{width:8px;height:8px;background:#e0e8e0;border-radius:50%;cursor:pointer}
+.tutorial-dot.active{background:#2d8c3c;width:24px;border-radius:12px}
+.business-logo{width:60px;height:60px;border-radius:50%;object-fit:cover;background:#f0f4f0}
+.upload-area{background:#f8faf8;border:2px dashed #c0d0c0;border-radius:16px;padding:20px;text-align:center;cursor:pointer;margin:12px 0}
+.upload-area i{font-size:28px;color:#2d8c3c;margin-bottom:8px;display:block}
 </style>
 
 <div class="app-bar">
@@ -2732,7 +3509,8 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 
 <div id="hamburgerMenu" class="hamburger-menu">
     <div class="menu-item" onclick="showAnalytics()"><i class="fas fa-chart-line"></i> Analytics</div>
-    <div class="menu-item" onclick="showSettings()"><i class="fas fa-cog"></i> Settings</div>
+    <div class="menu-divider"></div>
+    <div class="menu-item" onclick="showTutorial()"><i class="fas fa-question-circle"></i> Tutorial</div>
     <div class="menu-divider"></div>
     <div class="menu-item" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
 </div>
@@ -2741,12 +3519,20 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     <div class="nav-item active" onclick="showPage('dashboard')"><i class="fas fa-chart-line"></i><span>Stats</span></div>
     <div class="nav-item" onclick="showPage('products')"><i class="fas fa-utensils"></i><span>Menu</span></div>
     <div class="nav-item" onclick="showPage('reviews')"><i class="fas fa-star"></i><span>Reviews</span></div>
-    <div class="nav-item" onclick="showPage('orders')"><i class="fas fa-shopping-cart"></i><span>Orders</span></div>
+    <div class="nav-item" onclick="showPage('posts')"><i class="fas fa-newspaper"></i><span>Posts</span></div>
     <div class="nav-item" onclick="showPage('settings')"><i class="fas fa-sliders-h"></i><span>Settings</span></div>
 </div>
 
 <div class="content" id="content"></div>
 
+<!-- Tutorial Modal -->
+<div id="tutorialModal" class="tutorial-overlay" style="display:none">
+    <div class="tutorial-card">
+        <div id="tutorialContent"></div>
+    </div>
+</div>
+
+<!-- Other Modals -->
 <div class="modal" id="productModal">
     <div class="modal-content">
         <div class="modal-header"><h3 id="modalTitle">Add Product</h3><span class="modal-close" onclick="closeProductModal()">&times;</span></div>
@@ -2768,11 +3554,54 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     </div>
 </div>
 
+<div class="modal" id="postModal">
+    <div class="modal-content">
+        <div class="modal-header"><h3>Create Post</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div>
+        <textarea id="postContent" class="input" placeholder="What's on your mind? Share news, promotions, or updates..." rows="4"></textarea>
+        <div class="upload-area" onclick="document.getElementById('postImages').click()">
+            <i class="fas fa-image"></i>
+            <div>Click to add photos (required)</div>
+            <div style="font-size:11px;margin-top:4px">JPG, PNG up to 5MB each</div>
+        </div>
+        <input type="file" id="postImages" multiple accept="image/*" style="display:none" onchange="previewPostImages(this)">
+        <div id="postImagePreview" class="product-images-container"></div>
+        <button class="btn" onclick="createPost()"><i class="fas fa-paper-plane"></i> Publish Post</button>
+    </div>
+</div>
+
+<div class="modal" id="locationModal">
+    <div class="modal-content">
+        <div class="modal-header"><h3>Update Business Location</h3><span class="modal-close" onclick="closeLocationModal()">&times;</span></div>
+        <div class="map-container" id="locationMap"></div>
+        <div class="location-badge"><i class="fas fa-location-dot"></i><div class="location-text" id="locationText">Drag the marker to pin your location</div></div>
+        <button class="confirm-loc" id="confirmLocBtn" onclick="saveNewLocation()"><i class="fas fa-check"></i> Confirm Location</button>
+    </div>
+</div>
+
+<div class="modal" id="logoModal">
+    <div class="modal-content">
+        <div class="modal-header"><h3>Update Business Logo</h3><span class="modal-close" onclick="closeLogoModal()">&times;</span></div>
+        <div class="upload-area" onclick="document.getElementById('logoInput').click()">
+            <i class="fas fa-image"></i>
+            <div>Click to upload new logo</div>
+            <div style="font-size:11px;margin-top:4px">JPG, PNG (recommended 500x500)</div>
+        </div>
+        <input type="file" id="logoInput" accept="image/*" style="display:none" onchange="updateLogo(this)">
+        <div id="logoPreview" class="text-center mt-3"></div>
+        <button class="btn-outline mt-3" onclick="removeLogo()"><i class="fas fa-trash"></i> Remove Logo</button>
+    </div>
+</div>
+
 <script>
 let sessionToken = localStorage.getItem('session_token');
-let vendorData = null, products = [], salesChart = null;
+let vendorData = null, products = [], posts = [], locationMap = null, locationMarker = null;
+let salesChart = null, trafficChart = null;
+let isOpen = false;
+let openStatusInterval = null;
 
 if (!sessionToken) window.location.href = '/auth';
+
+const CATEGORIES = ["Coffee","Pancit","Tusok Tusok","Contemporary Street food","Bread and Pastry","Lomi","Beverage","Sarisari Store","Karendirya","Traditional Desserts","Contemporary Desserts","Squidball","Siomai","Siopao","Taho","Balut and other poultry","Corn","Fruit shakes","Fruit Juice"];
 
 function showToast(msg){
     let t=document.querySelector('.toast');
@@ -2795,47 +3624,151 @@ async function api(url, options = {}) {
 
 async function loadData() {
     const data = await api('/api/vendor/data');
-    if (data) { vendorData = data.vendor; products = data.products || []; }
+    if (data) { vendorData = data.vendor; products = data.products || []; posts = data.posts || []; }
+}
+
+function checkOpenStatus() {
+    if(!vendorData?.operating_hours) return;
+    const now = new Date();
+    const day = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][now.getDay()];
+    const currentHour = now.getHours();
+    const hours = vendorData.operating_hours[day];
+    
+    if(hours === 'closed') {
+        if(isOpen) updateOpenStatus(false);
+        return;
+    }
+    if(hours && hours !== 'closed') {
+        const [openH, closeH] = hours.split('-').map(t => parseInt(t));
+        const shouldBeOpen = currentHour >= openH && currentHour < closeH;
+        if(shouldBeOpen !== isOpen) updateOpenStatus(shouldBeOpen);
+    }
+}
+
+async function updateOpenStatus(status) {
+    isOpen = status;
+    await api('/api/vendor/update-open-status', { method: 'POST', body: JSON.stringify({ is_open: status }) });
+    const statusEl = document.getElementById('openStatusDisplay');
+    if(statusEl) {
+        statusEl.innerHTML = status ? '<span class="open-status open"><i class="fas fa-check-circle"></i> Open Now</span>' : '<span class="open-status closed"><i class="fas fa-clock"></i> Closed</span>';
+    }
+    showToast(status ? 'Your shop is now OPEN! Customers can find you.' : 'Your shop is now CLOSED. Location sharing stopped.');
+}
+
+async function toggleOpenStatus() {
+    const newStatus = !isOpen;
+    await updateOpenStatus(newStatus);
 }
 
 function showPage(p) {
     document.querySelectorAll('.nav-item').forEach((el, i) => {
-        const pages = ['dashboard', 'products', 'reviews', 'orders', 'settings'];
+        const pages = ['dashboard', 'products', 'reviews', 'posts', 'settings'];
         el.classList.toggle('active', pages[i] === p);
     });
     if (p === 'dashboard') showDashboard();
     else if (p === 'products') showProducts();
     else if (p === 'reviews') showReviews();
-    else if (p === 'orders') showOrders();
+    else if (p === 'posts') showPosts();
     else if (p === 'settings') showSettings();
 }
 
 async function showDashboard() {
     document.getElementById('content').innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
     await loadData();
+    
+    const analytics = await api('/api/vendor/analytics');
+    isOpen = vendorData?.is_open || false;
+    const logoUrl = vendorData?.logo || null;
+    
     document.getElementById('content').innerHTML = `
-        <div class="stats-grid">
-            <div class="stat-card"><div class="stat-value">${vendorData?.traffic_count || 0}</div><div class="stat-label">Total Visits</div></div>
-            <div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div>
-            <div class="stat-card"><div class="stat-value">${products.length}</div><div class="stat-label">Products</div></div>
-            <div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div>
+        <div class="card" style="background:linear-gradient(135deg,#2d8c3c,#1a6b28);color:white">
+            <div class="flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    ${logoUrl ? `<img src="${logoUrl}" class="business-logo" style="width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid white">` : `<div class="business-logo" style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:28px"><i class="fas fa-store"></i></div>`}
+                    <div>
+                        <p style="opacity:0.9;font-size:13px">Welcome back,</p>
+                        <h2 style="font-size:22px">${vendorData?.user_name || 'Vendor'}!</h2>
+                        <p style="opacity:0.9;margin-top:2px;font-size:13px">${vendorData?.business_name}</p>
+                    </div>
+                </div>
+                <button class="btn-outline btn-sm" style="background:rgba(255,255,255,0.2);border:none;color:white" onclick="openLogoModal()"><i class="fas fa-edit"></i></button>
+            </div>
         </div>
-        <div class="chart-container"><canvas id="trafficChart"></canvas></div>
+        
+        <div class="open-toggle">
+            <div>
+                <label><i class="fas fa-store"></i> Shop Status</label>
+                <div id="openStatusDisplay" class="mt-1">${isOpen ? '<span class="open-status open"><i class="fas fa-check-circle"></i> Open Now</span>' : '<span class="open-status closed"><i class="fas fa-clock"></i> Closed</span>'}</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="openToggle" ${isOpen ? 'checked' : ''} onchange="toggleOpenStatus()">
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div>
+            <div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div>
+            <div class="stat-card"><div class="stat-value">${analytics?.total_saves || 0}</div><div class="stat-label">Saved by Customers</div></div>
+            <div class="stat-card"><div class="stat-value">${analytics?.total_likes || 0}</div><div class="stat-label">Post Likes</div></div>
+        </div>
+        
         <div class="card">
-            <div class="flex justify-between items-center"><div><h3><i class="fas fa-store"></i> ${vendorData?.business_name}</h3><p class="text-secondary"><i class="fas fa-tag"></i> ${vendorData?.category}</p></div><span class="badge"><i class="fas ${vendorData?.is_verified ? 'fa-check-circle' : 'fa-clock'}"></i> ${vendorData?.is_verified ? 'Verified' : 'Pending'}</span></div>
-            <p class="mt-2"><i class="fas fa-map-marker-alt"></i> ${vendorData?.address || 'No address'}</p>
-            <p><i class="fas fa-phone"></i> ${vendorData?.phone || 'No phone'}</p>
-            <p><i class="fas fa-envelope"></i> ${vendorData?.email}</p>
-        </div>`;
+            <h3><i class="fas fa-chart-line"></i> Foot Traffic (Past 7 Days)</h3>
+            <div class="chart-container" style="padding:0;margin-top:12px"><canvas id="trafficChart"></canvas></div>
+        </div>
+        
+        <div class="card">
+            <h3><i class="fas fa-chart-bar"></i> Engagement Overview</h3>
+            <div class="stats-grid" style="margin-top:12px">
+                <div class="stat-card" style="background:#f0f4f0;color:#1a2e1a"><div class="stat-value" style="color:#2d8c3c">${analytics?.trend_score || 0}%</div><div class="stat-label">Trend Score</div></div>
+                <div class="stat-card" style="background:#f0f4f0;color:#1a2e1a"><div class="stat-value" style="color:#2d8c3c">${analytics?.post_engagement || 0}</div><div class="stat-label">Post Engagements</div></div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h3><i class="fas fa-chart-line"></i> Peak Hours</h3>
+            <div id="peakHoursChart" style="height:200px"></div>
+            ${analytics?.suggested_hours ? `<div class="mt-3 text-secondary" style="background:#f8faf5;padding:12px;border-radius:12px"><i class="fas fa-lightbulb"></i> Suggestion: Based on traffic data, consider operating ${analytics.suggested_hours}</div>` : ''}
+        </div>
+        
+        <div class="card">
+            <h3><i class="fas fa-map-marked-alt"></i> Customer Heatmap</h3>
+            <div class="heatmap-container" id="heatmapContainer"></div>
+            <p class="text-secondary mt-2"><i class="fas fa-info-circle"></i> Shows where customers are when they view your page</p>
+        </div>
+    `;
     
     setTimeout(() => {
-        if (salesChart) salesChart.destroy();
-        salesChart = new Chart(document.getElementById('trafficChart'), {
+        if (trafficChart) trafficChart.destroy();
+        trafficChart = new Chart(document.getElementById('trafficChart'), {
             type: 'line',
-            data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [{ label: 'Visitors', data: vendorData?.weekly_traffic || [5, 8, 12, 15, 20, 25, 18], borderColor: '#2d8c3c', backgroundColor: 'rgba(45,140,60,0.1)', fill: true, tension: 0.4 }] },
+            data: { labels: analytics?.weekly_labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{ label: 'Visitors', data: analytics?.weekly_traffic || [5,8,12,15,20,25,18], borderColor: '#2d8c3c', backgroundColor: 'rgba(45,140,60,0.1)', fill: true, tension: 0.4 }] },
             options: { responsive: true, maintainAspectRatio: true }
         });
+        
+        if(analytics?.peak_hours){
+            const peakData = analytics.peak_hours;
+            new Chart(document.getElementById('peakHoursChart'), {
+                type: 'bar',
+                data: { labels: Object.keys(peakData), datasets: [{ label: 'Visitors', data: Object.values(peakData), backgroundColor: '#2d8c3c', borderRadius: 8 }] },
+                options: { responsive: true, maintainAspectRatio: true }
+            });
+        }
+        
+        if(document.getElementById('heatmapContainer')){
+            const heatDiv = document.getElementById('heatmapContainer');
+            heatDiv.style.background = '#e8ece8';
+            heatDiv.style.display = 'flex';
+            heatDiv.style.alignItems = 'center';
+            heatDiv.style.justifyContent = 'center';
+            heatDiv.innerHTML = '<i class="fas fa-map-marker-alt" style="font-size:48px;color:#2d8c3c;opacity:0.5"></i><p class="text-secondary" style="margin-left:10px">Heatmap based on customer GPS data</p>';
+        }
     }, 100);
+    
+    if(openStatusInterval) clearInterval(openStatusInterval);
+    openStatusInterval = setInterval(checkOpenStatus, 60000);
+    checkOpenStatus();
 }
 
 async function showProducts() {
@@ -2844,7 +3777,7 @@ async function showProducts() {
         <button class="btn" onclick="openAddProductModal()"><i class="fas fa-plus"></i> Add Product</button>
         <div id="productsList" class="mt-4">${products.map(p => `
             <div class="product-card">
-                <div class="flex justify-between"><div><h4><i class="fas fa-utensils"></i> ${p.name}</h4><p class="text-secondary">${p.description || ''}</p><div class="flex gap-2 mt-1"><span class="badge">${p.category}</span><span class="product-stock"><i class="fas fa-box"></i> Stock: ${p.stock}</span></div></div><div class="product-price">₱${p.price}</div></div>
+                <div class="flex justify-between"><div><h4><i class="fas fa-utensils"></i> ${p.name}</h4><p class="text-secondary">${p.description || ''}</p><div class="flex gap-2 mt-1"><span class="badge">${p.category}</span></div></div><div class="product-price">₱${p.price}</div></div>
                 ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail}"></div>`).join('')}</div>` : ''}
                 <div class="flex gap-2 mt-3"><button class="btn-outline btn-sm" onclick="openEditProductModal('${p.id}')"><i class="fas fa-edit"></i> Edit</button><button class="btn-outline btn-sm" onclick="deleteProduct('${p.id}')"><i class="fas fa-trash"></i> Delete</button></div>
             </div>
@@ -2863,7 +3796,6 @@ function openAddProductModal() {
         <select id="prodCategory" class="input">${CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select>
         <div class="flex gap-2">
             <input type="number" id="prodPrice" class="input" placeholder="Price (₱) *" step="0.01">
-            <input type="number" id="prodStock" class="input" placeholder="Stock">
         </div>
         <div class="flex items-center gap-2" style="margin: 12px 0;">
             <button type="button" class="btn-outline btn-sm" id="choosePhotosBtn"><i class="fas fa-image"></i> Choose Photos</button>
@@ -2901,7 +3833,7 @@ async function openEditProductModal(productId) {
         <input type="text" id="prodName" class="input" placeholder="Product name *" value="${product.name.replace(/"/g, '&quot;')}">
         <textarea id="prodDesc" class="input" placeholder="Description" rows="3">${product.description || ''}</textarea>
         <select id="prodCategory" class="input">${CATEGORIES.map(c => `<option ${product.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
-        <div class="flex gap-2"><input type="number" id="prodPrice" class="input" placeholder="Price (₱) *" step="0.01" value="${product.price}"><input type="number" id="prodStock" class="input" placeholder="Stock" value="${product.stock}"></div>
+        <div class="flex gap-2"><input type="number" id="prodPrice" class="input" placeholder="Price (₱) *" step="0.01" value="${product.price}"></div>
         <div class="flex items-center gap-2" style="margin: 12px 0;"><button type="button" class="btn-outline btn-sm" id="choosePhotosBtn"><i class="fas fa-image"></i> Add Photos</button><span class="text-secondary" id="fileCount">Select new photos</span></div>
         <input type="file" id="prodImages" multiple accept="image/*" style="position: absolute; left: -9999px;">
         <div id="imagePreview" class="product-images-container"></div>
@@ -2978,7 +3910,7 @@ async function saveProduct() {
         description: document.getElementById('prodDesc').value,
         category: document.getElementById('prodCategory').value,
         price: price,
-        stock: parseInt(document.getElementById('prodStock').value) || 0,
+        stock: 0,
         images: images
     };
     
@@ -3009,26 +3941,154 @@ async function showReviews() {
         <div class="card">
             <div class="flex justify-between items-center"><div><strong><i class="fas fa-user-circle"></i> ${r.customer_name}</strong><div class="stars mt-1">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div></div><span class="text-secondary"><i class="far fa-calendar-alt"></i> ${new Date(r.created_at).toLocaleDateString()}</span></div>
             <p class="mt-2">${r.comment || 'No comment provided'}</p>
-            ${r.images && r.images.length ? `<div class="image-grid mt-2">${r.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail}"></div>`).join('')}</div>` : ''}
         </div>
-    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-star"></i> No reviews yet. Share your link with customers!</div>';
+    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-star"></i> No reviews yet.</div>';
 }
 
-function showOrders() {
-    document.getElementById('content').innerHTML = '<div class="card text-center"><i class="fas fa-shopping-cart fa-3x" style="color:#2d8c3c"></i><p class="mt-2">Order management coming soon!</p></div>';
+async function showPosts() {
+    await loadData();
+    const feed = await api('/api/vendor/posts');
+    document.getElementById('content').innerHTML = `
+        <button class="btn" onclick="openPostModal()"><i class="fas fa-plus"></i> Create Post</button>
+        <div id="postsList" class="mt-4">${(feed?.posts || []).map(p => `
+            <div class="post-card">
+                <div class="post-header">
+                    ${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:48px;height:48px;border-radius:50%;object-fit:cover">` : `<div class="post-avatar"><i class="fas fa-store"></i></div>`}
+                    <div><strong>${vendorData?.business_name}</strong><br><span class="text-secondary">${new Date(p.created_at).toLocaleDateString()}</span></div>
+                </div>
+                <div class="post-content">${p.content}</div>
+                ${p.images && p.images.length ? `<div class="post-images">${p.images.slice(0,3).map(img => `<img src="${img.thumbnail}" class="post-image">`).join('')}</div>` : ''}
+                <div class="post-stats">
+                    <span><i class="far fa-heart"></i> ${p.likes || 0} likes</span>
+                    <span><i class="far fa-comment"></i> ${p.comment_count || 0} comments</span>
+                    <span><i class="far fa-bookmark"></i> ${p.saves || 0} saves</span>
+                </div>
+                <div class="flex gap-2 mt-3"><button class="btn-outline btn-sm" onclick="deletePost('${p.id}')"><i class="fas fa-trash"></i> Delete</button></div>
+            </div>
+        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-newspaper"></i> No posts yet. Create your first post to engage customers!</div>'}</div>`;
+}
+
+function previewPostImages(input) {
+    const previewDiv = document.getElementById('postImagePreview');
+    previewDiv.innerHTML = '';
+    for (let i = 0; i < input.files.length; i++) {
+        const file = input.files[i];
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            previewDiv.innerHTML += `
+                <div class="image-preview">
+                    <img src="${e.target.result}">
+                    <div class="remove-img" onclick="this.parentElement.remove()">✖</div>
+                </div>
+            `;
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+async function createPost() {
+    const content = document.getElementById('postContent').value;
+    const files = document.getElementById('postImages').files;
+    
+    if (!content) { showToast('Please write something'); return; }
+    if (files.length === 0) { showToast('Please add at least 1 photo to your post'); return; }
+    
+    const images = [];
+    for (let file of files) {
+        const reader = new FileReader();
+        const imgData = await new Promise(resolve => { reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
+        images.push(imgData);
+    }
+    
+    const res = await api('/api/vendor/post/create', { method: 'POST', body: JSON.stringify({ content, images }) });
+    if (res && res.success) {
+        showToast('Post published!');
+        closePostModal();
+        document.getElementById('postContent').value = '';
+        document.getElementById('postImages').value = '';
+        document.getElementById('postImagePreview').innerHTML = '';
+        showPosts();
+    } else {
+        showToast('Failed to create post');
+    }
+}
+
+async function deletePost(postId) {
+    if (confirm('Delete this post?')) {
+        await api('/api/vendor/post/delete', { method: 'POST', body: JSON.stringify({ post_id: postId }) });
+        showToast('Post deleted');
+        showPosts();
+    }
 }
 
 async function showSettings() {
     await loadData();
     const hours = vendorData?.operating_hours || {};
     document.getElementById('content').innerHTML = `
-        <div class="card"><h3><i class="fas fa-clock"></i> Operating Hours</h3><div id="hoursPreview" class="hours-grid"></div><button class="btn-outline mt-3" onclick="openHoursModal()"><i class="fas fa-sliders-h"></i> Set Hours with Slider</button></div>
-        <div class="card"><h3><i class="fas fa-map-marker-alt"></i> Location</h3><p class="text-secondary">Current: ${vendorData?.latitude || 'Not set'}, ${vendorData?.longitude || 'Not set'}</p><button class="btn-outline" onclick="updateMyLocation()"><i class="fas fa-location-dot"></i> Update Location</button></div>
-        <div class="card"><h3><i class="fas fa-store"></i> Business Info</h3><p><strong>${vendorData?.business_name}</strong><br><i class="fas fa-tag"></i> ${vendorData?.category}<br><i class="fas fa-phone"></i> ${vendorData?.phone || 'No phone'}<br><i class="fas fa-envelope"></i> ${vendorData?.email}</p></div>`;
+        <div class="card">
+            <h3><i class="fas fa-clock"></i> Operating Hours</h3>
+            <div id="hoursPreview" class="hours-grid"></div>
+            <button class="btn-outline mt-3" onclick="openHoursModal()"><i class="fas fa-sliders-h"></i> Set Hours</button>
+        </div>
+        <div class="card">
+            <h3><i class="fas fa-map-marker-alt"></i> Business Location</h3>
+            <p class="text-secondary">Current: ${vendorData?.latitude || 'Not set'}, ${vendorData?.longitude || 'Not set'}</p>
+            <button class="btn-outline" onclick="openLocationModal()"><i class="fas fa-location-dot"></i> Update Location</button>
+        </div>
+        <div class="card">
+            <h3><i class="fas fa-image"></i> Business Logo</h3>
+            ${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:12px">` : '<p class="text-secondary">No logo uploaded</p>'}
+            <button class="btn-outline" onclick="openLogoModal()"><i class="fas fa-upload"></i> Update Logo</button>
+        </div>
+        <div class="card">
+            <h3><i class="fas fa-store"></i> Business Info</h3>
+            <p><strong>${vendorData?.business_name}</strong><br><i class="fas fa-tag"></i> ${vendorData?.category}<br><i class="fas fa-phone"></i> ${vendorData?.phone || 'No phone'}<br><i class="fas fa-envelope"></i> ${vendorData?.email}</p>
+        </div>
+    `;
     
     const previewDiv = document.getElementById('hoursPreview');
     const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
     previewDiv.innerHTML = days.map(day => `<div class="hours-item"><span class="hours-day">${day}</span><span>${hours[day] || 'closed'}</span></div>`).join('');
+}
+
+function openLogoModal() {
+    document.getElementById('logoModal').classList.add('show');
+    if(vendorData?.logo){
+        document.getElementById('logoPreview').innerHTML = `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">`;
+    }
+}
+
+async function updateLogo(input) {
+    if(input.files && input.files[0]){
+        const file = input.files[0];
+        if(file.size > 5*1024*1024){ showToast('File too large. Max 5MB'); return; }
+        const reader = new FileReader();
+        reader.onload = async function(e){
+            const logoData = e.target.result;
+            const res = await api('/api/vendor/update-logo', { method: 'POST', body: JSON.stringify({ logo: logoData }) });
+            if(res && res.success){
+                showToast('Logo updated!');
+                closeLogoModal();
+                showSettings();
+                showDashboard();
+            } else {
+                showToast('Failed to update logo');
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+async function removeLogo() {
+    if(confirm('Remove your business logo?')){
+        const res = await api('/api/vendor/update-logo', { method: 'POST', body: JSON.stringify({ logo: null }) });
+        if(res && res.success){
+            showToast('Logo removed');
+            closeLogoModal();
+            showSettings();
+            showDashboard();
+        }
+    }
 }
 
 function openHoursModal() {
@@ -3062,17 +4122,30 @@ async function saveHours() {
         else { const openH = document.getElementById(`open_${day}`)?.value || 9; const closeH = document.getElementById(`close_${day}`)?.value || 18; hours[day] = `${openH}:00-${closeH}:00`; }
     });
     const res = await api('/api/vendor/update-hours', { method: 'POST', body: JSON.stringify({ hours }) });
-    if (res && res.success) { showToast('Hours saved!'); closeHoursModal(); showSettings(); }
+    if (res && res.success) { showToast('Hours saved! Auto-status will update based on hours'); closeHoursModal(); showSettings(); checkOpenStatus(); }
 }
 
-async function updateMyLocation() {
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(async (p) => {
-            showToast('Updating location...');
-            const res = await api('/api/vendor/update-location', { method: 'POST', body: JSON.stringify({ latitude: p.coords.latitude, longitude: p.coords.longitude }) });
-            if (res && res.success) { showToast('Location updated!'); showSettings(); }
-        }, () => showToast('Could not get location'));
-    }
+function openLocationModal() {
+    document.getElementById('locationModal').classList.add('show');
+    setTimeout(() => {
+        if (typeof L !== 'undefined') {
+            if (locationMap) locationMap.remove();
+            locationMap = L.map('locationMap').setView([vendorData?.latitude || 14.5995, vendorData?.longitude || 120.9842], 16);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(locationMap);
+            locationMarker = L.marker([vendorData?.latitude || 14.5995, vendorData?.longitude || 120.9842], { draggable: true }).addTo(locationMap);
+            locationMarker.on('dragend', function(e) {
+                const pos = e.target.getLatLng();
+                document.getElementById('locationText').innerHTML = `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
+            });
+            document.getElementById('locationText').innerHTML = `${vendorData?.latitude || 'Tap to set'}, ${vendorData?.longitude || 'Tap to set'}`;
+        }
+    }, 100);
+}
+
+async function saveNewLocation() {
+    const pos = locationMarker.getLatLng();
+    const res = await api('/api/vendor/update-location', { method: 'POST', body: JSON.stringify({ latitude: pos.lat, longitude: pos.lng }) });
+    if (res && res.success) { showToast('Location updated!'); closeLocationModal(); showSettings(); }
 }
 
 async function showAnalytics() {
@@ -3081,37 +4154,90 @@ async function showAnalytics() {
         <div class="stats-grid">
             <div class="stat-card"><div class="stat-value">${data.total_visits || 0}</div><div class="stat-label">Total Visits</div></div>
             <div class="stat-card"><div class="stat-value">${data.avg_rating || 'N/A'}</div><div class="stat-label">Avg Rating</div></div>
-            <div class="stat-card"><div class="stat-value">${data.total_products || 0}</div><div class="stat-label">Products</div></div>
-            <div class="stat-card"><div class="stat-value">${data.total_reviews || 0}</div><div class="stat-label">Reviews</div></div>
+            <div class="stat-card"><div class="stat-value">${data.total_saves || 0}</div><div class="stat-label">Times Saved</div></div>
+            <div class="stat-card"><div class="stat-value">${data.total_likes || 0}</div><div class="stat-label">Post Likes</div></div>
         </div>
         <div class="chart-container"><canvas id="trafficAnalyticsChart"></canvas></div>
-        <div class="chart-container"><canvas id="weeklyChart"></canvas></div>`;
+        <div class="chart-container"><canvas id="weeklyChart"></canvas></div>
+        <div class="card"><h3>Peak Hours Analysis</h3><div id="peakDetail"></div></div>`;
     document.getElementById('analyticsModal').classList.add('show');
     setTimeout(() => {
         new Chart(document.getElementById('trafficAnalyticsChart'), {
             type: 'line',
-            data: { labels: data.weekly_labels || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [{ label: 'Visitors', data: data.weekly_data || [5, 8, 12, 15, 20, 25, 18], borderColor: '#2d8c3c', backgroundColor: 'rgba(45,140,60,0.1)', fill: true, tension: 0.4 }] }
+            data: { labels: data.weekly_labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{ label: 'Visitors', data: data.weekly_data || [5,8,12,15,20,25,18], borderColor: '#2d8c3c', fill: true }] }
         });
         new Chart(document.getElementById('weeklyChart'), {
             type: 'bar',
-            data: { labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'], datasets: [{ label: 'Sales', data: data.monthly_sales || [1000, 1500, 2000, 1800], backgroundColor: '#2d8c3c', borderRadius: 8 }] }
+            data: { labels: ['Week 1','Week 2','Week 3','Week 4'], datasets: [{ label: 'Engagement', data: data.monthly_engagement || [100,150,200,180], backgroundColor: '#2d8c3c', borderRadius: 8 }] }
         });
+        if(data.peak_hours){
+            document.getElementById('peakDetail').innerHTML = Object.entries(data.peak_hours).map(([hour, count]) => `<div class="flex justify-between"><span>${hour}:00</span><span>${count} visitors</span></div>`).join('');
+        }
     }, 100);
+}
+
+function showTutorial() {
+    const steps = [
+        { icon: "<i class='fas fa-chart-line'></i>", title: "Welcome to Vendor Dashboard!", desc: "This is your command center where you can manage your entire business on Lako.", features: ["View your shop stats and ratings", "Track customer engagement", "Monitor foot traffic in real-time"] },
+        { icon: "<i class='fas fa-toggle-on'></i>", title: "Open/Close Toggle", desc: "Control when customers can see your location. When OPEN, customers can find you on the map.", features: ["Toggle ON during business hours", "Auto-updates based on your operating hours", "Location sharing only when OPEN"] },
+        { icon: "<i class='fas fa-utensils'></i>", title: "Manage Your Menu", desc: "Add, edit, and remove products from your menu with photos.", features: ["Add product name, price, description", "Upload multiple photos", "Organize by category"] },
+        { icon: "<i class='fas fa-newspaper'></i>", title: "Create Posts", desc: "Share updates, promotions, and engage with your customers.", features: ["Post text and photos (required)", "Customers can like and comment", "Track post engagement"] },
+        { icon: "<i class='fas fa-star'></i>", title: "Reviews & Ratings", desc: "See what customers are saying about your business.", features: ["Read customer reviews", "Respond to feedback", "Improve your rating"] },
+        { icon: "<i class='fas fa-sliders-h'></i>", title: "Settings", desc: "Configure your business hours, location, and logo.", features: ["Set operating hours with sliders", "Update your business location on map", "Upload your business logo", "Business will auto-open/close based on hours"] }
+    ];
+    
+    let stepIndex = 0;
+    const modal = document.getElementById('tutorialModal');
+    const content = document.getElementById('tutorialContent');
+    
+    function renderStep() {
+        const step = steps[stepIndex];
+        content.innerHTML = `
+            <div class="tutorial-step">
+                <div class="icon">${step.icon}</div>
+                <h3>${step.title}</h3>
+                <p>${step.desc}</p>
+                <div class="feature-list">
+                    ${step.features.map(f => `<li><i class="fas fa-check-circle"></i> ${f}</li>`).join('')}
+                </div>
+                <div class="tutorial-dots">
+                    ${steps.map((_, i) => `<div class="tutorial-dot ${i === stepIndex ? 'active' : ''}" onclick="goToStep(${i})"></div>`).join('')}
+                </div>
+                <div class="flex gap-2">
+                    ${stepIndex > 0 ? '<button class="btn-outline" onclick="prevStep()"><i class="fas fa-arrow-left"></i> Back</button>' : ''}
+                    <button class="btn" onclick="${stepIndex === steps.length - 1 ? 'closeTutorial()' : 'nextStep()'}">${stepIndex === steps.length - 1 ? '<i class="fas fa-check"></i> Get Started' : 'Next <i class="fas fa-arrow-right"></i>'}</button>
+                </div>
+            </div>
+        `;
+    }
+    
+    window.goToStep = (i) => { stepIndex = i; renderStep(); };
+    window.nextStep = () => { if(stepIndex < steps.length - 1) { stepIndex++; renderStep(); } };
+    window.prevStep = () => { if(stepIndex > 0) { stepIndex--; renderStep(); } };
+    window.closeTutorial = () => { modal.style.display = 'none'; localStorage.setItem('tutorial_seen', 'true'); };
+    
+    modal.style.display = 'flex';
+    renderStep();
 }
 
 function closeProductModal() { document.getElementById('productModal').classList.remove('show'); }
 function closeHoursModal() { document.getElementById('hoursModal').classList.remove('show'); }
 function closeAnalyticsModal() { document.getElementById('analyticsModal').classList.remove('show'); }
+function closePostModal() { document.getElementById('postModal').classList.remove('show'); }
+function closeLocationModal() { document.getElementById('locationModal').classList.remove('show'); }
+function closeLogoModal() { document.getElementById('logoModal').classList.remove('show'); }
 function toggleMenu() { document.getElementById('hamburgerMenu').classList.toggle('show'); }
 function logout() { localStorage.clear(); window.location.href = '/'; }
 
 let fa=document.createElement('link');fa.rel='stylesheet';fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';document.head.appendChild(fa);
 let chartScript=document.createElement('script');chartScript.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';document.head.appendChild(chartScript);
+let leaflet=document.createElement('link');leaflet.rel='stylesheet';leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(leaflet);
+let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';document.head.appendChild(leafletScript);
 
+if(!localStorage.getItem('tutorial_seen')) setTimeout(showTutorial, 500);
 showDashboard();
 </script>
 ''')
-
 # ============================================
 # ADMIN DASHBOARD (Updated with modern GUI)
 # ============================================
@@ -3119,7 +4245,7 @@ showDashboard();
 ADMIN_DASH = render_page("Admin Panel", '''
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+body{background:#f8faf8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 .app-bar{background:white;padding:16px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100}
 .back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
 .app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
@@ -3129,32 +4255,31 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer}
 .nav-item i{font-size:22px}
 .nav-item.active{color:#2d8c3c}
-.card{background:white;border-radius:24px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
+.card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03)}
 .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px}
-.stat-card{background:white;border-radius:20px;padding:16px;text-align:center}
-.stat-value{font-size:28px;font-weight:800;color:#2d8c3c}
-.stat-label{font-size:12px;color:#8ba88b;margin-top:4px}
+.stat-card{background:linear-gradient(135deg,#2d8c3c,#1a6b28);border-radius:20px;padding:16px;text-align:center;color:white}
+.stat-value{font-size:28px;font-weight:800}
+.stat-label{font-size:12px;opacity:0.9}
 .chart-container{background:white;border-radius:20px;padding:16px;margin-bottom:20px}
-.search-bar{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:44px;padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.search-bar{background:white;border:1px solid #e0e8e0;border-radius:30px;padding:10px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px}
 .search-bar i{color:#8ba88b}
 .search-bar input{flex:1;border:none;background:transparent;font-size:15px;outline:none}
-.btn-outline{background:white;border:1.5px solid #2d8c3c;color:#2d8c3c;padding:8px 16px;border-radius:40px;font-size:13px;cursor:pointer}
+.btn-outline{background:white;border:1px solid #2d8c3c;color:#2d8c3c;padding:6px 14px;border-radius:30px;font-size:12px;cursor:pointer}
 .flex{display:flex}
 .justify-between{justify-content:space-between}
 .items-center{align-items:center}
 .gap-2{gap:8px}
-.gap-3{gap:12px}
 .mt-2{margin-top:8px}
 .mt-4{margin-top:16px}
-.text-secondary{color:#8ba88b;font-size:13px}
+.text-secondary{color:#8ba88b;font-size:12px}
 .text-center{text-align:center}
 .hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
 .hamburger-menu.show{right:0}
-.menu-item{padding:16px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px}
+.menu-item{padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px}
 .menu-item:hover{background:#f0f4f0}
 .menu-divider{height:1px;background:#e8ece8;margin:12px 0}
-.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:14px;border-radius:50px;text-align:center;z-index:1000}
 .loading{text-align:center;padding:40px;color:#8ba88b}
+.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:12px;border-radius:30px;text-align:center;z-index:1000}
 </style>
 
 <div class="app-bar">
@@ -3217,8 +4342,8 @@ async function showStats() {
     setTimeout(() => {
         new Chart(document.getElementById('growthChart'), {
             type: 'line',
-            data: { labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'], datasets: [{ label: 'Users', data: data.user_growth || [10, 25, 45, 70, 100, 150], borderColor: '#2d8c3c', backgroundColor: 'rgba(45,140,60,0.1)', fill: true, tension: 0.4 }] },
-            options: { responsive: true, maintainAspectRatio: true }
+            data: { labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'], datasets: [{ label: 'Users', data: data.user_growth || [10, 25, 45, 70, 100, 150], borderColor: '#2d8c3c', fill: true, tension: 0.4 }] },
+            options: { responsive: true }
         });
     }, 100);
 }
@@ -3231,18 +4356,17 @@ async function showUsers() {
         <div id="usersList">${(data.users || []).map(u => `
             <div class="card" data-email="${u.email.toLowerCase()}">
                 <div class="flex justify-between items-center">
-                    <div><strong><i class="fas fa-user-circle"></i> ${u.email}</strong><br><span class="text-secondary">${u.full_name || 'No name'} • ${u.role}</span><br><small><i class="far fa-calendar-alt"></i> Joined: ${new Date(u.created_at).toLocaleDateString()}</small></div>
+                    <div><strong><i class="fas fa-user-circle"></i> ${u.email}</strong><br><span class="text-secondary">${u.full_name || 'No name'} • ${u.role}</span><br><small>Joined: ${new Date(u.created_at).toLocaleDateString()}</small></div>
                     <button class="btn-outline" onclick="suspendUser('${u.id}', ${u.is_suspended})"><i class="fas ${u.is_suspended ? 'fa-user-check' : 'fa-user-slash'}"></i> ${u.is_suspended ? 'Unsuspend' : 'Suspend'}</button>
                 </div>
             </div>
-        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No users found</div>'}</div>`;
+        `).join('') || '<div class="card text-center text-secondary">No users found</div>'}</div>`;
 }
 
 function filterUsers() {
     const query = document.getElementById('userSearch')?.value.toLowerCase() || '';
     document.querySelectorAll('#usersList .card').forEach(card => {
-        const email = card.dataset.email;
-        card.style.display = email.includes(query) ? 'block' : 'none';
+        card.style.display = card.dataset.email.includes(query) ? 'block' : 'none';
     });
 }
 
@@ -3254,18 +4378,17 @@ async function showVendors() {
         <div id="vendorsList">${(data.vendors || []).map(v => `
             <div class="card" data-name="${v.business_name.toLowerCase()}">
                 <div class="flex justify-between items-center">
-                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category} • ${v.is_active ? 'Active' : 'Inactive'} • <i class="fas fa-star"></i> ${v.rating || 'New'}</span><br><small><i class="fas fa-user"></i> Owner ID: ${v.user_id?.slice(0,8)}...</small></div>
+                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary">${v.category} • ${v.is_active ? 'Active' : 'Inactive'} • Rating: ${v.rating || 'New'}</span><br><small>Owner ID: ${v.user_id?.slice(0,8)}...</small></div>
                     <button class="btn-outline" onclick="toggleVendor('${v.id}', ${v.is_active})"><i class="fas ${v.is_active ? 'fa-ban' : 'fa-check-circle'}"></i> ${v.is_active ? 'Disable' : 'Enable'}</button>
                 </div>
             </div>
-        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors found</div>'}</div>`;
+        `).join('') || '<div class="card text-center text-secondary">No vendors found</div>'}</div>`;
 }
 
 function filterVendorList() {
     const query = document.getElementById('vendorSearch')?.value.toLowerCase() || '';
     document.querySelectorAll('#vendorsList .card').forEach(card => {
-        const name = card.dataset.name;
-        card.style.display = name.includes(query) ? 'block' : 'none';
+        card.style.display = card.dataset.name.includes(query) ? 'block' : 'none';
     });
 }
 
@@ -3290,9 +4413,6 @@ let chartScript=document.createElement('script');chartScript.src='https://cdn.js
 showStats();
 </script>
 ''')
-# Due to length constraints, the Customer, Vendor, Admin dashboards and API routes follow the same pattern.
-# All API endpoints are properly configured for real GPS location data.
-
 # ============================================
 # API ROUTES
 # ============================================
@@ -3324,7 +4444,7 @@ def vendor_page():
 @app.route('/admin')
 def admin_page(): 
     return ADMIN_DASH     # NOT a placeholder - returns full admin panel
-# ============================================
+
 # AUTH API
 
 # ============================================
@@ -3680,31 +4800,348 @@ def health():
 # ============================================
 
 # ============================================
-# MISSING API ROUTES - CUSTOMER & VENDOR
-# COPY THIS ENTIRE BLOCK INTO YOUR server.py
+# COMPLETE CUSTOMER API ENDPOINTS
+# Add these to your server.py
 # ============================================
 
 # ============================================
-# CUSTOMER API ROUTES
+# PROFILE ENDPOINTS
 # ============================================
 
-@app.route('/api/customer/analytics', methods=['GET'])
-def customer_analytics():
+@app.route('/api/customer/profile', methods=['GET'])
+def get_customer_profile():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session:
         return jsonify({'error': 'Unauthorized'}), 401
+    
+    user = get_user_by_id(session['user_id'])
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
     return jsonify({
-        'total_visits': 0,
-        'reviews_written': 0,
-        'posts_created': 0,
-        'likes_given': 0,
-        'weekly_activity': [5, 8, 12, 15, 20, 25, 18]
+        'full_name': user.get('full_name', ''),
+        'phone': user.get('phone', ''),
+        'profile_photo': user.get('profile_photo', ''),
+        'email': user.get('email', '')
     })
+
+@app.route('/api/customer/update-profile', methods=['POST'])
+def update_customer_profile():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    update_data = {}
+    if data.get('full_name'):
+        update_data['full_name'] = data['full_name']
+    if data.get('phone'):
+        update_data['phone'] = data['phone']
+    
+    supabase.table('users').update(update_data).eq('id', session['user_id']).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/customer/update-profile-photo', methods=['POST'])
+def update_profile_photo():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    photo = data.get('photo')
+    
+    supabase.table('users').update({'profile_photo': photo}).eq('id', session['user_id']).execute()
+    return jsonify({'success': True})
+
+# ============================================
+# PREFERENCES ENDPOINTS
+# ============================================
+
+@app.route('/api/customer/preferences', methods=['GET'])
+def get_customer_preferences():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    user = get_user_by_id(session['user_id'])
+    prefs = user.get('preferences', {})
+    if not prefs:
+        prefs = {'categories': [], 'priceMin': 0, 'priceMax': 500, 'maxDistance': 10}
+    return jsonify(prefs)
+
+@app.route('/api/customer/update-preferences', methods=['POST'])
+def update_customer_preferences():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    supabase.table('users').update({'preferences': data}).eq('id', session['user_id']).execute()
+    return jsonify({'success': True})
+
+# ============================================
+# FOLLOW ENDPOINTS
+# ============================================
+
+@app.route('/api/customer/follows', methods=['GET'])
+def get_follows():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Get followed vendors
+    vendor_follows = supabase.table('vendor_follows').select('vendor_id').eq('user_id', session['user_id']).execute()
+    vendors = []
+    for vf in (vendor_follows.data or []):
+        vendor = get_vendor_by_id(vf['vendor_id'])
+        if vendor:
+            vendors.append(vendor)
+    
+    # Get followed users
+    user_follows = supabase.table('user_follows').select('followed_id').eq('follower_id', session['user_id']).execute()
+    users = [uf['followed_id'] for uf in (user_follows.data or [])]
+    
+    return jsonify({'vendors': vendors, 'users': users})
+
+@app.route('/api/guest/map/vendors', methods=['GET'])
+def guest_nearby_vendors():
+    lat = float(request.args.get('lat', 14.5995))
+    lng = float(request.args.get('lng', 120.9842))
+    vendors = get_vendors_nearby(lat, lng, 50)
+    return jsonify({'vendors': vendors})
+
+@app.route('/api/customer/follow-vendor', methods=['POST'])
+def follow_vendor():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    vendor_id = data.get('vendor_id')
+    
+    existing = supabase.table('vendor_follows').select('*').eq('user_id', session['user_id']).eq('vendor_id', vendor_id).execute()
+    if existing.data:
+        supabase.table('vendor_follows').delete().eq('user_id', session['user_id']).eq('vendor_id', vendor_id).execute()
+        return jsonify({'success': True, 'action': 'unfollowed'})
+    else:
+        supabase.table('vendor_follows').insert({
+            'id': str(uuid.uuid4()),
+            'user_id': session['user_id'],
+            'vendor_id': vendor_id,
+            'created_at': utc_now()
+        }).execute()
+        return jsonify({'success': True, 'action': 'followed'})
+
+@app.route('/api/customer/follow', methods=['POST'])
+def follow_user():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    followed_id = data.get('user_id')
+    
+    existing = supabase.table('user_follows').select('*').eq('follower_id', session['user_id']).eq('followed_id', followed_id).execute()
+    if existing.data:
+        supabase.table('user_follows').delete().eq('follower_id', session['user_id']).eq('followed_id', followed_id).execute()
+        return jsonify({'success': True, 'action': 'unfollowed'})
+    else:
+        supabase.table('user_follows').insert({
+            'id': str(uuid.uuid4()),
+            'follower_id': session['user_id'],
+            'followed_id': followed_id,
+            'created_at': utc_now()
+        }).execute()
+        return jsonify({'success': True, 'action': 'followed'})
+
+# ============================================
+# LOCATION ENDPOINTS
+# ============================================
+
+@app.route('/api/customer/update-location', methods=['POST'])
+def update_customer_location():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    supabase.table('users').update({
+        'last_location_lat': data.get('lat'),
+        'last_location_lng': data.get('lng'),
+        'last_location_updated': utc_now()
+    }).eq('id', session['user_id']).execute()
+    
+    return jsonify({'success': True})
+
+@app.route('/api/customer/map/vendors', methods=['GET'])
+def get_nearby_vendors_api():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    lat = float(request.args.get('lat', 14.5995))
+    lng = float(request.args.get('lng', 120.9842))
+    
+    # Use stored procedure for distance calculation
+    result = supabase.rpc('get_nearby_vendors', {
+        'lat': lat,
+        'lng': lng,
+        'radius_km': 50
+    }).execute()
+    
+    vendors = result.data or []
+    
+    # Get open status for each vendor
+    for v in vendors:
+        hours = v.get('operating_hours', {})
+        if isinstance(hours, str):
+            try:
+                hours = json.loads(hours)
+            except:
+                hours = {}
+        
+        now = datetime.now(timezone.utc)
+        day = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.weekday()]
+        day_hours = hours.get(day, 'closed')
+        
+        if day_hours == 'closed':
+            v['is_open'] = False
+        else:
+            try:
+                open_h, close_h = map(int, day_hours.split('-')[0].split(':')[0]), map(int, day_hours.split('-')[1].split(':')[0])
+                v['is_open'] = open_h <= now.hour < close_h
+            except:
+                v['is_open'] = False
+    
+    return jsonify({'vendors': vendors})
+
+# ============================================
+# POSTS & FEED ENDPOINTS
+# ============================================
+
+@app.route('/api/customer/feed', methods=['GET'])
+def get_customer_feed():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Get posts
+    posts = supabase.table('posts').select('*').is_('parent_id', 'null').order('created_at', desc=True).limit(50).execute()
+    
+    # Get all unique user IDs
+    user_ids = list(set([p['user_id'] for p in (posts.data or []) if p.get('user_id')]))
+    
+    # Fetch users in batch
+    users = {}
+    if user_ids:
+        users_result = supabase.table('users').select('id, full_name').in_('id', user_ids).execute()
+        for u in (users_result.data or []):
+            users[u['id']] = u['full_name']
+    
+    result = []
+    for p in (posts.data or []):
+        p['author'] = users.get(p['user_id'], 'User') if p.get('user_id') else 'User'
+        
+        # Get like count
+        likes = supabase.table('post_likes').select('*', count='exact').eq('post_id', p['id']).execute()
+        p['likes'] = likes.count or 0
+        
+        # Get comment count
+        comments = supabase.table('posts').select('*', count='exact').eq('parent_id', p['id']).execute()
+        p['comment_count'] = comments.count or 0
+        
+        result.append(p)
+    
+    return jsonify({'posts': result})
+@app.route('/api/customer/post/create', methods=['POST'])
+def create_customer_post():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    post_id = create_post(session['user_id'], session['role'], data.get('content'), data.get('images', []))
+    
+    if post_id:
+        return jsonify({'success': True, 'post_id': post_id})
+    return jsonify({'error': 'Failed to create post'}), 500
+
+@app.route('/api/customer/like', methods=['POST'])
+def like_post():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    post_id = data.get('post_id')
+    
+    existing = supabase.table('post_likes').select('*').eq('post_id', post_id).eq('user_id', session['user_id']).execute()
+    
+    if existing.data:
+        supabase.table('post_likes').delete().eq('post_id', post_id).eq('user_id', session['user_id']).execute()
+        supabase.table('posts').update({'likes': supabase.raw('likes - 1')}).eq('id', post_id).execute()
+        return jsonify({'success': True, 'liked': False})
+    else:
+        supabase.table('post_likes').insert({
+            'id': str(uuid.uuid4()),
+            'post_id': post_id,
+            'user_id': session['user_id'],
+            'created_at': utc_now()
+        }).execute()
+        supabase.table('posts').update({'likes': supabase.raw('likes + 1')}).eq('id', post_id).execute()
+        return jsonify({'success': True, 'liked': True})
+
+@app.route('/api/customer/comment', methods=['POST'])
+def add_comment():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    comment_id = str(uuid.uuid4())
+    
+    comment_data = {
+        'id': comment_id,
+        'parent_id': data.get('post_id'),
+        'user_id': session['user_id'],
+        'user_role': 'customer',
+        'content': data.get('comment'),
+        'images': [],
+        'likes': 0,
+        'comment_count': 0,
+        'created_at': utc_now()
+    }
+    
+    supabase.table('posts').insert(comment_data).execute()
+    supabase.rpc('increment_comment_count', {'post_id': data.get('post_id')}).execute()
+    
+    return jsonify({'success': True})
+
+# ============================================
+# REVIEWS ENDPOINTS
+# ============================================
 
 @app.route('/api/customer/reviews/<vendor_id>', methods=['GET'])
 def get_customer_reviews(vendor_id):
     reviews = get_reviews_by_vendor(vendor_id)
     return jsonify({'reviews': reviews})
+
+@app.route('/api/customer/review/create', methods=['POST'])
+def create_customer_review():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'customer':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    review_id = create_review(session['user_id'], data.get('vendor_id'), data.get('rating'), data.get('comment'))
+    
+    if review_id:
+        return jsonify({'success': True, 'review_id': review_id})
+    return jsonify({'error': 'Failed to create review'}), 500
+
+# ============================================
+# PRODUCTS ENDPOINTS
+# ============================================
 
 @app.route('/api/customer/products/<vendor_id>', methods=['GET'])
 def get_customer_products(vendor_id):
@@ -3713,11 +5150,16 @@ def get_customer_products(vendor_id):
         p.pop('stock', None)
     return jsonify({'products': products})
 
+# ============================================
+# SHORTLIST ENDPOINTS
+# ============================================
+
 @app.route('/api/customer/shortlist', methods=['GET'])
 def get_shortlist_route():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session:
         return jsonify({'error': 'Unauthorized'}), 401
+    
     vendors = get_shortlist(session['user_id'])
     return jsonify({'vendors': vendors})
 
@@ -3726,9 +5168,11 @@ def toggle_shortlist_route():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session:
         return jsonify({'error': 'Unauthorized'}), 401
+    
     data = request.json
     vendor_id = data.get('vendor_id')
     existing = get_shortlist(session['user_id'])
+    
     if any(v['id'] == vendor_id for v in existing):
         remove_from_shortlist(session['user_id'], vendor_id)
         return jsonify({'success': True, 'action': 'removed'})
@@ -3736,47 +5180,319 @@ def toggle_shortlist_route():
         add_to_shortlist(session['user_id'], vendor_id)
         return jsonify({'success': True, 'action': 'added'})
 
-@app.route('/api/customer/like', methods=['POST'])
-def like_post_route():
+# ============================================
+# ANALYTICS ENDPOINTS
+# ============================================
+
+@app.route('/api/customer/analytics', methods=['GET'])
+def get_customer_analytics():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session:
         return jsonify({'error': 'Unauthorized'}), 401
-    data = request.json
-    liked = like_post(data.get('post_id'), session['user_id'])
-    return jsonify({'success': True, 'liked': liked})
-
-@app.route('/api/customer/post/create', methods=['POST'])
-def create_post_route():
-    session = require_session(request.headers.get('X-Session-Token'))
-    if not session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    data = request.json
-    post_id = create_post(session['user_id'], session['role'], data.get('content'), data.get('images', []))
-    return jsonify({'success': True, 'post_id': post_id}) if post_id else jsonify({'error': 'Failed'}), 500
-
-@app.route('/api/customer/review/create', methods=['POST'])
-def create_review_route():
-    session = require_session(request.headers.get('X-Session-Token'))
-    if not session or session['role'] != 'customer':
-        return jsonify({'error': 'Unauthorized'}), 401
-    data = request.json
-    review_id = create_review(session['user_id'], data.get('vendor_id'), data.get('rating'), data.get('comment'))
-    return jsonify({'success': True, 'review_id': review_id}) if review_id else jsonify({'error': 'Failed'}), 500
+    
+    user_id = session['user_id']
+    
+    # Get reviews written
+    reviews = supabase.table('reviews').select('*', count='exact').eq('customer_id', user_id).execute()
+    reviews_written = reviews.count or 0
+    
+    # Get posts created
+    posts = supabase.table('posts').select('*', count='exact').eq('user_id', user_id).is_('parent_id', 'null').execute()
+    posts_created = posts.count or 0
+    
+    # Get likes given
+    likes = supabase.table('post_likes').select('*', count='exact').eq('user_id', user_id).execute()
+    likes_given = likes.count or 0
+    
+    # Get vendors visited (from reviews)
+    visited_vendors = supabase.table('reviews').select('vendor_id').eq('customer_id', user_id).execute()
+    total_visits = len(set([v['vendor_id'] for v in (visited_vendors.data or [])]))
+    
+    # Weekly activity (last 7 days)
+    weekly_activity = []
+    today = datetime.now(timezone.utc).date()
+    for i in range(6, -1, -1):
+        date = today - timedelta(days=i)
+        day_start = datetime.combine(date, datetime.min.time()).replace(tzinfo=timezone.utc).isoformat()
+        day_end = datetime.combine(date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc).isoformat()
+        
+        day_posts = supabase.table('posts').select('*', count='exact').eq('user_id', user_id).gte('created_at', day_start).lt('created_at', day_end).execute()
+        day_likes = supabase.table('post_likes').select('*', count='exact').eq('user_id', user_id).gte('created_at', day_start).lt('created_at', day_end).execute()
+        weekly_activity.append((day_posts.count or 0) + (day_likes.count or 0))
+    
+    return jsonify({
+        'total_visits': total_visits,
+        'reviews_written': reviews_written,
+        'posts_created': posts_created,
+        'likes_given': likes_given,
+        'weekly_activity': weekly_activity
+    })
 
 # ============================================
-# VENDOR API ROUTES
+# VENDOR API ROUTES - COMPLETE WITH REAL DATA
 # ============================================
 
-@app.route('/api/vendor/data')
+@app.route('/api/vendor/data', methods=['GET'])
 def get_vendor_data():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session or session['role'] != 'vendor':
         return jsonify({'error': 'Unauthorized'}), 401
+    
     vendor = get_vendor_by_user_id(session['user_id'])
     if not vendor:
         return jsonify({'error': 'Vendor not found'}), 404
+    
     products = get_products_by_vendor(vendor['id'])
-    return jsonify({'vendor': vendor, 'products': products})
+    
+    # Get vendor's posts
+    posts = supabase.table('posts').select('*').eq('user_id', session['user_id']).order('created_at', desc=True).execute()
+    
+    return jsonify({
+        'vendor': vendor,
+        'products': products,
+        'posts': posts.data or []
+    })
+
+@app.route('/api/vendor/update-open-status', methods=['POST'])
+def update_open_status():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'vendor':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    vendor = get_vendor_by_user_id(session['user_id'])
+    if not vendor:
+        return jsonify({'error': 'Vendor not found'}), 404
+    
+    supabase.table('vendors').update({'is_open': data.get('is_open')}).eq('id', vendor['id']).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/vendor/posts', methods=['GET'])
+def get_vendor_posts_route():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'vendor':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    posts = supabase.table('posts').select('*, users(full_name)').eq('user_id', session['user_id']).order('created_at', desc=True).execute()
+    
+    result = []
+    for p in (posts.data or []):
+        # Get like count
+        likes = supabase.table('post_likes').select('*', count='exact').eq('post_id', p['id']).execute()
+        # Get comment count
+        comments = supabase.table('posts').select('*', count='exact').eq('parent_id', p['id']).execute()
+        
+        result.append({
+            'id': p['id'],
+            'content': p['content'],
+            'images': p.get('images', []),
+            'likes': likes.count or 0,
+            'comment_count': comments.count or 0,
+            'saves': 0,
+            'created_at': p['created_at'],
+            'author': p.get('users', {}).get('full_name', 'Vendor') if p.get('users') else 'Vendor'
+        })
+    
+    return jsonify({'posts': result})
+
+@app.route('/api/vendor/post/create', methods=['POST'])
+def create_vendor_post():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    post_id = create_post(session['user_id'], session['role'], data.get('content'), data.get('images', []))
+    return jsonify({'success': True, 'post_id': post_id}) if post_id else jsonify({'error': 'Failed'}), 500
+
+@app.route('/api/vendor/post/delete', methods=['POST'])
+def delete_vendor_post():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    try:
+        # Delete post and its likes
+        supabase.table('post_likes').delete().eq('post_id', data.get('post_id')).execute()
+        supabase.table('posts').delete().eq('id', data.get('post_id')).eq('user_id', session['user_id']).execute()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/vendor/analytics', methods=['GET'])
+def get_vendor_analytics():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'vendor':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    vendor = get_vendor_by_user_id(session['user_id'])
+    if not vendor:
+        return jsonify({'error': 'Vendor not found'}), 404
+    
+    vendor_id = vendor['id']
+    
+    # ============================================
+    # 1. GET SAVES COUNT (how many customers saved this shop)
+    # ============================================
+    saves = supabase.table('shortlists').select('*', count='exact').eq('vendor_id', vendor_id).execute()
+    total_saves = saves.count or 0
+    
+    # ============================================
+    # 2. GET POST LIKES AND ENGAGEMENT
+    # ============================================
+    vendor_posts = supabase.table('posts').select('id').eq('user_id', session['user_id']).execute()
+    post_ids = [p['id'] for p in (vendor_posts.data or [])]
+    
+    total_likes = 0
+    total_comments = 0
+    if post_ids:
+        likes = supabase.table('post_likes').select('*', count='exact').in_('post_id', post_ids).execute()
+        total_likes = likes.count or 0
+        
+        comments = supabase.table('posts').select('*', count='exact').in_('parent_id', post_ids).execute()
+        total_comments = comments.count or 0
+    
+    post_engagement = total_likes + total_comments
+    
+    # ============================================
+    # 3. GET WEEKLY TRAFFIC (last 7 days)
+    # ============================================
+    weekly_labels = []
+    weekly_traffic = []
+    today = datetime.now(timezone.utc).date()
+    
+    for i in range(6, -1, -1):
+        date = today - timedelta(days=i)
+        weekly_labels.append(date.strftime('%a'))
+        
+        # Count views from traffic_log or from vendor's traffic_count by day
+        # For now, get from reviews created per day as proxy
+        day_start = datetime.combine(date, datetime.min.time()).replace(tzinfo=timezone.utc).isoformat()
+        day_end = datetime.combine(date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc).isoformat()
+        
+        views = supabase.table('reviews').select('*', count='exact').eq('vendor_id', vendor_id).gte('created_at', day_start).lt('created_at', day_end).execute()
+        weekly_traffic.append(views.count or 0)
+    
+    # ============================================
+    # 4. GET PEAK HOURS (from reviews and traffic)
+    # ============================================
+    peak_hours = {str(h): 0 for h in range(8, 22)}
+    
+    # Get all reviews for this vendor to analyze peak hours
+    all_reviews = supabase.table('reviews').select('created_at').eq('vendor_id', vendor_id).execute()
+    
+    for review in (all_reviews.data or []):
+        try:
+            created_at = review.get('created_at')
+            if created_at:
+                dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                hour = dt.hour
+                if 8 <= hour <= 21:
+                    peak_hours[str(hour)] = peak_hours.get(str(hour), 0) + 1
+        except:
+            pass
+    
+    # Filter out hours with zero activity
+    peak_hours = {k: v for k, v in peak_hours.items() if v > 0}
+    
+    # ============================================
+    # 5. SUGGESTED OPERATING HOURS (based on peak hours)
+    # ============================================
+    suggested_hours = None
+    if peak_hours:
+        hours_list = [(int(h), count) for h, count in peak_hours.items()]
+        hours_list.sort(key=lambda x: x[1], reverse=True)
+        
+        if hours_list:
+            peak_start = hours_list[0][0]
+            # Find continuous block of high traffic
+            suggested_start = max(8, peak_start - 1)
+            suggested_end = min(21, peak_start + 3)
+            suggested_hours = f"{suggested_start}:00 AM - {suggested_end}:00 PM"
+    
+    # ============================================
+    # 6. TREND SCORE (based on recent activity)
+    # ============================================
+    # Calculate trend score from last 30 days
+    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    
+    recent_reviews = supabase.table('reviews').select('*', count='exact').eq('vendor_id', vendor_id).gte('created_at', thirty_days_ago).execute()
+    recent_saves = supabase.table('shortlists').select('*', count='exact').eq('vendor_id', vendor_id).gte('created_at', thirty_days_ago).execute()
+    recent_posts = supabase.table('posts').select('*', count='exact').eq('user_id', session['user_id']).gte('created_at', thirty_days_ago).execute()
+    recent_likes = total_likes  # Already from all time, but could be filtered
+    
+    trend_score = min(100, int(
+        (recent_reviews.count or 0) * 3 +
+        (recent_saves.count or 0) * 2 +
+        (recent_posts.count or 0) * 5 +
+        (total_likes * 1)
+    ))
+    
+    # ============================================
+    # 7. MONTHLY ENGAGEMENT (last 4 weeks)
+    # ============================================
+    monthly_engagement = []
+    for week in range(4):
+        week_start = (datetime.now(timezone.utc) - timedelta(days=(week+1)*7)).isoformat()
+        week_end = (datetime.now(timezone.utc) - timedelta(days=week*7)).isoformat()
+        
+        week_likes = 0
+        if post_ids:
+            week_likes_data = supabase.table('post_likes').select('*', count='exact').in_('post_id', post_ids).gte('created_at', week_start).lt('created_at', week_end).execute()
+            week_likes = week_likes_data.count or 0
+        
+        monthly_engagement.append(week_likes)
+    
+    monthly_engagement.reverse()
+    
+    # ============================================
+    # 8. CUSTOMER HEATMAP DATA (locations where customers viewed)
+    # ============================================
+    # Get unique customer locations from reviews and shortlists
+    heatmap_locations = []
+    
+    # Get customers who reviewed
+    reviewers = supabase.table('reviews').select('customer_id').eq('vendor_id', vendor_id).execute()
+    customer_ids = list(set([r['customer_id'] for r in (reviewers.data or [])]))
+    
+    # Get customer locations from their profile or activity
+    for customer_id in customer_ids[:50]:  # Limit for performance
+        customer = get_user_by_id(customer_id)
+        if customer and customer.get('last_location_lat') and customer.get('last_location_lng'):
+            heatmap_locations.append({
+                'lat': customer['last_location_lat'],
+                'lng': customer['last_location_lng'],
+                'intensity': 0.5
+            })
+    
+    return jsonify({
+        'total_visits': vendor.get('traffic_count', 0),
+        'avg_rating': vendor.get('rating', 0),
+        'total_saves': total_saves,
+        'total_likes': total_likes,
+        'post_engagement': post_engagement,
+        'trend_score': trend_score,
+        'weekly_labels': weekly_labels,
+        'weekly_traffic': weekly_traffic,
+        'peak_hours': peak_hours,
+        'suggested_hours': suggested_hours,
+        'monthly_engagement': monthly_engagement,
+        'heatmap_locations': heatmap_locations
+    })
+
+@app.route('/api/vendor/reviews', methods=['GET'])
+def get_vendor_reviews_route():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'vendor':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    vendor = get_vendor_by_user_id(session['user_id'])
+    if not vendor:
+        return jsonify({'error': 'Vendor not found'}), 404
+    
+    reviews = get_reviews_by_vendor(vendor['id'])
+    return jsonify({'reviews': reviews})
 
 @app.route('/api/vendor/product/create', methods=['POST'])
 def create_product_route():
@@ -3789,86 +5505,113 @@ def create_product_route():
         return jsonify({'error': 'Vendor not found'}), 404
     
     data = request.json
-    # Remove stock parameter - only pass 6 arguments
     product_id = create_product(
         vendor['id'], 
         data.get('name'), 
         data.get('description'), 
         data.get('category'), 
         data.get('price'), 
-        data.get('images', [])
+        data.get('images', []),
+        0  # stock = 0 (hidden from UI)
     )
     
-    return jsonify({'success': True, 'product_id': product_id}) if product_id else jsonify({'error': 'Failed'}), 500
+    if product_id:
+        return jsonify({'success': True, 'product_id': product_id})
+    return jsonify({'error': 'Failed to create product'}), 500
 
 @app.route('/api/vendor/product/update', methods=['POST'])
 def update_product_route():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session or session['role'] != 'vendor':
         return jsonify({'error': 'Unauthorized'}), 401
+    
     data = request.json
-    update_data = {k: v for k, v in data.items() if k != 'product_id'}
-    success = update_product(data.get('product_id'), update_data)
-    return jsonify({'success': success})
+    product_id = data.get('product_id')
+    
+    # Verify product belongs to this vendor
+    product = supabase.table('products').select('vendor_id').eq('id', product_id).execute()
+    if not product.data:
+        return jsonify({'error': 'Product not found'}), 404
+    
+    vendor = get_vendor_by_user_id(session['user_id'])
+    if product.data[0]['vendor_id'] != vendor['id']:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    product_data = {
+        'name': data.get('name'),
+        'description': data.get('description'),
+        'category': data.get('category'),
+        'price': data.get('price'),
+        'stock': 0,
+        'images': data.get('images', [])
+    }
+    
+    success = update_product(product_id, product_data)
+    
+    if success:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to update product'}), 500
 
 @app.route('/api/vendor/product/delete', methods=['POST'])
 def delete_product_route():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session or session['role'] != 'vendor':
         return jsonify({'error': 'Unauthorized'}), 401
+    
     data = request.json
-    success = delete_product(data.get('product_id'))
-    return jsonify({'success': success})
-
-@app.route('/api/vendor/reviews')
-def get_vendor_reviews_route():
-    session = require_session(request.headers.get('X-Session-Token'))
-    if not session or session['role'] != 'vendor':
-        return jsonify({'error': 'Unauthorized'}), 401
+    product_id = data.get('product_id')
+    
+    # Verify product belongs to this vendor
+    product = supabase.table('products').select('vendor_id').eq('id', product_id).execute()
+    if not product.data:
+        return jsonify({'error': 'Product not found'}), 404
+    
     vendor = get_vendor_by_user_id(session['user_id'])
-    if not vendor:
-        return jsonify({'error': 'Vendor not found'}), 404
-    reviews = get_reviews_by_vendor(vendor['id'])
-    return jsonify({'reviews': reviews})
+    if product.data[0]['vendor_id'] != vendor['id']:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    success = delete_product(product_id)
+    
+    if success:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to delete product'}), 500
 
 @app.route('/api/vendor/update-hours', methods=['POST'])
 def update_hours_route():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session or session['role'] != 'vendor':
         return jsonify({'error': 'Unauthorized'}), 401
+    
     vendor = get_vendor_by_user_id(session['user_id'])
     if not vendor:
         return jsonify({'error': 'Vendor not found'}), 404
+    
     data = request.json
-    success = update_vendor_hours(vendor['id'], data.get('hours'))
-    return jsonify({'success': success})
+    try:
+        supabase.table('vendors').update({'operating_hours': data.get('hours')}).eq('id', vendor['id']).execute()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/vendor/update-location', methods=['POST'])
 def update_location_route():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session or session['role'] != 'vendor':
         return jsonify({'error': 'Unauthorized'}), 401
+    
     vendor = get_vendor_by_user_id(session['user_id'])
     if not vendor:
         return jsonify({'error': 'Vendor not found'}), 404
+    
     data = request.json
-    success = update_vendor_location(vendor['id'], data.get('latitude'), data.get('longitude'))
-    return jsonify({'success': success})
-
-@app.route('/api/vendor/analytics', methods=['GET'])
-def vendor_analytics():
-    session = require_session(request.headers.get('X-Session-Token'))
-    if not session or session['role'] != 'vendor':
-        return jsonify({'error': 'Unauthorized'}), 401
-    return jsonify({
-        'total_visits': 0,
-        'avg_rating': 0,
-        'total_products': 0,
-        'total_reviews': 0,
-        'weekly_labels': ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-        'weekly_data': [5, 8, 12, 15, 20, 25, 18],
-        'monthly_sales': [1000, 1500, 2000, 1800]
-    })
+    try:
+        supabase.table('vendors').update({
+            'latitude': data.get('latitude'),
+            'longitude': data.get('longitude')
+        }).eq('id', vendor['id']).execute()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 # ============================================
 # RUN APP
 # ============================================

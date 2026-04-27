@@ -25,6 +25,10 @@ load_dotenv()
 # CONFIGURATION
 # ============================================
 
+# ============================================
+# CONFIGURATION
+# ============================================
+
 SECRET_KEY = os.environ.get('SECRET_KEY', 'lako-secret-key-2024')
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
@@ -32,7 +36,8 @@ BREVO_API_KEY = os.environ.get('BREVO_API_KEY')
 BREVO_SENDER_EMAIL = os.environ.get('BREVO_SENDER_EMAIL')
 BREVO_SENDER_NAME = os.environ.get('BREVO_SENDER_NAME', 'Lako')
 TEXTBEE_API_KEY = os.environ.get('TEXTBEE_API_KEY')
-TEXTBEE_SENDER_ID = os.environ.get('TEXTBEE_SENDER_ID', 'Lako')
+TEXTBEE_DEVICE_ID = os.environ.get('TEXTBEE_DEVICE_ID')
+TEXTBEE_SENDER_NAME = os.environ.get('TEXTBEE_SENDER_NAME', 'Lako')
 APP_NAME = os.environ.get('APP_NAME', 'Lako')
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
@@ -62,20 +67,25 @@ print("✓ Supabase connected")
 # NOTIFICATION SERVICE (Brevo Email + TextBee SMS)
 # ============================================
 
+# ============================================
+# NOTIFICATION SERVICE (Brevo Email + TextBee SMS)
+# ============================================
+
 class NotificationService:
     def __init__(self):
         self.brevo_api_key = BREVO_API_KEY
         self.brevo_sender_email = BREVO_SENDER_EMAIL
         self.brevo_sender_name = BREVO_SENDER_NAME
         self.textbee_api_key = TEXTBEE_API_KEY
-        self.textbee_sender_id = TEXTBEE_SENDER_ID
+        self.textbee_device_id = TEXTBEE_DEVICE_ID
+        self.textbee_sender_name = TEXTBEE_SENDER_NAME
         self.email_enabled = bool(self.brevo_api_key and self.brevo_sender_email)
-        self.sms_enabled = bool(self.textbee_api_key)
+        self.sms_enabled = bool(self.textbee_api_key and self.textbee_device_id)
         
         if self.email_enabled:
             print(f"✓ Brevo email enabled - Sender: {self.brevo_sender_name} <{self.brevo_sender_email}>")
         if self.sms_enabled:
-            print(f"✓ TextBee SMS enabled - Sender ID: {self.textbee_sender_id}")
+            print(f"✓ TextBee SMS enabled - Device ID: {self.textbee_device_id}")
     
     def send_email(self, to_email, subject, html_content):
         """Send email using Brevo API"""
@@ -114,13 +124,12 @@ class NotificationService:
             return False
     
     def send_sms(self, phone_number, message):
-        """Send SMS using TextBee API"""
+        """Send SMS using TextBee API with Device ID"""
         if not self.sms_enabled or not phone_number:
             print(f"[SMS SIMULATION] To: {phone_number}, Message: {message}")
             return True
         
         try:
-            # Clean phone number to 63XXXXXXXXXX format
             phone = phone_number.replace('+63', '').replace('-', '').replace(' ', '')
             if phone.startswith('0'):
                 phone = phone[1:]
@@ -135,7 +144,7 @@ class NotificationService:
                 },
                 json={
                     "to": phone,
-                    "sender_id": self.textbee_sender_id,
+                    "deviceId": self.textbee_device_id,
                     "message": message
                 },
                 timeout=30
@@ -205,14 +214,6 @@ class NotificationService:
             welcome_message = "Start exploring street food vendors near you in Tiaong, Quezon!"
             cta_text = "Start Exploring"
             cta_link = f"{BASE_URL}/customer"
-            features = [
-                ("📍", "Find street food vendors near you"),
-                ("📋", "Browse menus with photos"),
-                ("⭐", "Save your favorite vendors"),
-                ("🗺️", "Get turn-by-turn directions"),
-                ("💬", "Share your food experiences"),
-                ("🏆", "Earn badges and rewards")
-            ]
         else:
             icon = "🏪"
             title = "Business Owner"
@@ -220,16 +221,6 @@ class NotificationService:
             welcome_message = "Start managing your business and reaching more customers in Tiaong, Quezon!"
             cta_text = "Go to Dashboard"
             cta_link = f"{BASE_URL}/vendor"
-            features = [
-                ("📝", "Manage your product catalog with photos"),
-                ("⏰", "Set operating hours"),
-                ("📊", "Track customer traffic"),
-                ("📈", "View analytics dashboard"),
-                ("⭐", "Receive customer reviews"),
-                ("📱", "Reach more customers in Tiaong")
-            ]
-        
-        features_html = ''.join([f'<div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;"><div style="font-size: 20px;">{f[0]}</div><div style="color: #4a5e4a;">{f[1]}</div></div>' for f in features])
         
         html = f"""
         <!DOCTYPE html>
@@ -246,13 +237,15 @@ class NotificationService:
                 <p style="color: #4a5e4a; font-size: 16px; line-height: 1.5;">{welcome_message}</p>
                 <div style="background: #f5faf5; padding: 20px; border-radius: 12px; margin: 20px 0;">
                     <p style="margin: 0 0 10px; font-weight: bold; color: #1a2e1a;">What you can do:</p>
-                    {features_html}
+                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">📍 Find street food vendors near you</div>
+                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">📋 Browse menus with photos</div>
+                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">⭐ Save your favorite vendors</div>
+                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">🗺️ Get turn-by-turn directions</div>
                 </div>
                 <div style="text-align: center;">
                     <a href="{cta_link}" style="display: inline-block; background: linear-gradient(135deg, #2d8c3c, #1a6b28); color: white; text-decoration: none; padding: 12px 28px; border-radius: 44px; font-weight: 600; margin: 10px 0;">{cta_text} →</a>
                 </div>
                 <hr style="border: none; border-top: 1px solid #e0e8e0; margin: 20px 0;">
-                <p style="color: #8ba88b; font-size: 11px; text-align: center;">Need help? Contact us at <strong style="color:#2d8c3c;">support@{APP_NAME.lower()}.com</strong></p>
                 <p style="color: #8ba88b; font-size: 11px; text-align: center;">© 2024 {APP_NAME} | Discover Tiaong's Finest Street Foods</p>
                 <p style="color: #8ba88b; font-size: 11px; text-align: center;">📍 Tiaong, Quezon | 🍢 Made with love for local food lovers</p>
             </div>
@@ -275,7 +268,6 @@ class NotificationService:
         return self.send_sms(phone, message)
 
 notifications = NotificationService()
-     
 
 # ============================================
 # AUTO OTP FUNCTIONS

@@ -329,9 +329,53 @@ def require_session():
     if not session:
         return None
     return {'user_id': session['user_id'], 'role': session['role']}
-# ============================================
-# HELPER FUNCTIONS FOR PHOTO STORAGE
-# ============================================
+
+
+
+def get_admin_stats():
+    stats = {'total_users': 0, 'total_vendors': 0, 'total_products': 0, 'total_reviews': 0, 'total_posts': 0, 'user_growth': [10, 25, 45, 70, 100, 150]}
+    try:
+        stats['total_users'] = supabase.table('users').select('*', count='exact').execute().count or 0
+        stats['total_vendors'] = supabase.table('vendors').select('*', count='exact').execute().count or 0
+        stats['total_products'] = supabase.table('products').select('*', count='exact').eq('is_active', True).execute().count or 0
+        stats['total_reviews'] = supabase.table('reviews').select('*', count='exact').execute().count or 0
+        stats['total_posts'] = supabase.table('posts').select('*', count='exact').execute().count or 0
+    except:
+        pass
+    return stats
+
+def get_all_users_admin():
+    try:
+        return supabase.table('users').select('*').order('created_at', desc=True).execute().data or []
+    except:
+        return []
+
+def get_all_vendors_admin():
+    try:
+        return supabase.table('vendors').select('*').order('created_at', desc=True).execute().data or []
+    except:
+        return []
+
+def suspend_user(user_id):
+    try:
+        supabase.table('users').update({'is_suspended': True}).eq('id', user_id).execute()
+        return True
+    except:
+        return False
+
+def unsuspend_user(user_id):
+    try:
+        supabase.table('users').update({'is_suspended': False}).eq('id', user_id).execute()
+        return True
+    except:
+        return False
+
+def toggle_vendor_active(vendor_id, is_active):
+    try:
+        supabase.table('vendors').update({'is_active': is_active}).eq('id', vendor_id).execute()
+        return True
+    except:
+        return False
 
 def save_profile_photo(user_id, base64_image):
     """Save profile photo to Supabase storage"""
@@ -1376,6 +1420,14 @@ button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
 .method-btn i{font-size:28px;display:block;margin-bottom:8px;color:#2d8c3c}
 .method-btn span{font-size:13px;font-weight:600;color:#1a2e1a}
 .method-btn small{font-size:11px;color:#8ba88b;display:block}
+.eula-modal, .error-modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:3000;align-items:center;justify-content:center;padding:20px}
+.eula-modal.show, .error-modal.show{display:flex}
+.eula-content, .error-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px}
+.eula-header, .error-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#1a2e1a}
+.eula-close, .error-close{font-size:28px;cursor:pointer;color:#8ba88b;padding:8px}
+.eula-text, .error-text{background:#f8faf8;padding:20px;border-radius:20px;font-size:14px;line-height:1.6;color:#4a5e4a;margin-bottom:20px}
+.eula-text h4{color:#1a2e1a;margin-bottom:12px}
+.error-icon{font-size:48px;color:#e53935;margin-bottom:16px}
 </style>
 
 <div class="header">
@@ -1389,13 +1441,62 @@ button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
     <p>AITE College</p>
 </div>
 
+<!-- EULA Modal -->
+<div id="eulaModal" class="eula-modal">
+    <div class="eula-content">
+        <div class="eula-header">
+            <h3><i class="fas fa-file-contract"></i> Terms of Service</h3>
+            <span class="eula-close" onclick="closeEULA()">&times;</span>
+        </div>
+        <div class="eula-text">
+            <h4>📜 LAKO TERMS OF SERVICE</h4>
+            <p>Welcome to Lako, the GPS-based vendor discovery app for Tiaong, Quezon!</p>
+            <p><strong>1. Acceptance of Terms</strong><br>By using Lako, you agree to these terms.</p>
+            <p><strong>2. User Conduct</strong><br>You agree to use the app responsibly and respectfully.</p>
+            <p><strong>3. Privacy</strong><br>Your location data is used only for finding nearby vendors. We never share your personal information.</p>
+            <p><strong>4. Vendor Information</strong><br>Vendors are responsible for the accuracy of their business information.</p>
+            <p><strong>5. Location Sharing</strong><br>You can choose to share your location for better vendor recommendations.</p>
+            <p><strong>6. Account Security</strong><br>You are responsible for maintaining the security of your account.</p>
+            <p><strong>7. Content Ownership</strong><br>You retain ownership of content you post, but grant Lako a license to display it.</p>
+            <p><strong>8. Prohibited Activities</strong><br>Do not harass users, post false information, or attempt to hack the app.</p>
+            <p><strong>9. Termination</strong><br>We may terminate accounts that violate these terms.</p>
+            <p><strong>10. Changes to Terms</strong><br>We may update these terms. Continued use means acceptance.</p>
+            <p><strong>11. Disclaimer</strong><br>Lako is provided "as is" without warranties.</p>
+            <p><strong>12. Contact</strong><br>Questions? Email support@lako.app</p>
+            <p style="margin-top:16px"><strong>By continuing, you agree to all terms above.</strong></p>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" id="eulaCheckbox" onchange="toggleEULAAccept()">
+            <span>I have read and agree to the <strong>Terms of Service</strong></span>
+        </div>
+        <button class="btn" id="acceptEulaBtn" onclick="acceptEULA()" disabled><i class="fas fa-check"></i> Accept & Continue</button>
+    </div>
+</div>
+
+<!-- Error Modal -->
+<div id="errorModal" class="error-modal">
+    <div class="error-content">
+        <div class="error-header">
+            <h3><i class="fas fa-exclamation-triangle"></i> Login Failed</h3>
+            <span class="error-close" onclick="closeErrorModal()">&times;</span>
+        </div>
+        <div class="error-text text-center">
+            <div class="error-icon"><i class="fas fa-lock"></i></div>
+            <p id="errorMessage" style="margin-bottom:20px;font-size:16px">Invalid credentials. Please check your email/phone and password.</p>
+            <button class="btn" onclick="closeErrorModalAndRetry()"><i class="fas fa-redo"></i> Try Again</button>
+        </div>
+    </div>
+</div>
+
 <script>
 let userRole = localStorage.getItem('selected_role') || 'customer';
 localStorage.setItem('user_role', userRole);
 
 let step='login';
 let q=0;
-let contactMethod = 'phone'; // 'phone' or 'email'
+let contactMethod = 'phone';
+let savedIdentifier = localStorage.getItem('saved_login_identifier') || '';
+let savedPassword = localStorage.getItem('saved_login_password') || '';
 let regData={
     email: '',
     phone: '',
@@ -1442,14 +1543,59 @@ function handleBack(){
     else{window.location.href='/';}
 }
 
+function toggleEULAAccept() {
+    const checkbox = document.getElementById('eulaCheckbox');
+    const btn = document.getElementById('acceptEulaBtn');
+    btn.disabled = !checkbox.checked;
+}
+
+function showEULA() {
+    document.getElementById('eulaModal').classList.add('show');
+}
+
+function closeEULA() {
+    document.getElementById('eulaModal').classList.remove('show');
+}
+
+function acceptEULA() {
+    regData.agreedToEula = true;
+    closeEULA();
+    register();
+}
+
+function showErrorModal(message, identifier, password) {
+    document.getElementById('errorMessage').innerHTML = message || 'Invalid credentials. Please check your email/phone and password.';
+    document.getElementById('errorModal').classList.add('show');
+    // Save the failed inputs for retry
+    if(identifier) localStorage.setItem('saved_login_identifier', identifier);
+    if(password) localStorage.setItem('saved_login_password', password);
+}
+
+function closeErrorModal() {
+    document.getElementById('errorModal').classList.remove('show');
+}
+
+function closeErrorModalAndRetry() {
+    closeErrorModal();
+    // Focus on login form with saved values
+    const identifierInput = document.getElementById('loginIdentifier');
+    const passwordInput = document.getElementById('loginPassword');
+    if(identifierInput) {
+        identifierInput.value = localStorage.getItem('saved_login_identifier') || '';
+        identifierInput.focus();
+    }
+    if(passwordInput) passwordInput.value = localStorage.getItem('saved_login_password') || '';
+}
+
 function getQuestions(){
     let qs = [];
     if(userRole === 'customer'){
         qs = ['Contact method', 'Your name', 'Phone number', 'Email address', 'Profile photo', 'Create password', 'Confirm password', 'Your preferences'];
-    } else {
+    } else if(userRole === 'vendor') {
         qs = ['Contact method', 'Business name', 'Your name', 'Phone number', 'Email address', 'Business category', 'Business location', 'Profile photo', 'Business logo', 'Create password', 'Confirm password'];
+    } else {
+        qs = ['Email address', 'Create password', 'Confirm password'];
     }
-    // Filter out based on contact method
     if(contactMethod === 'phone'){
         qs = qs.filter(q => q !== 'Email address');
     } else {
@@ -1499,12 +1645,10 @@ function initLocationMap(){
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
     }).addTo(map);
     
-    // Add click handler to pin location
     map.on('click', function(e){
         pinLocation(e.latlng.lat, e.latlng.lng);
     });
     
-    // Try to get user's current location
     if(navigator.geolocation){
         navigator.geolocation.getCurrentPosition(
             function(position){
@@ -1526,24 +1670,20 @@ function initLocationMap(){
 }
 
 function pinLocation(lat, lng){
-    // Remove existing marker
     if(currentMarker){
         map.removeLayer(currentMarker);
     }
     
-    // Add new marker
     currentMarker = L.marker([lat, lng], {draggable: true}).addTo(map);
     currentMarker.on('dragend', function(e){
         let pos = e.target.getLatLng();
         pinLocation(pos.lat, pos.lng);
     });
     
-    // Update regData
     regData.location.lat = lat;
     regData.location.lng = lng;
     regData.locationConfirmed = false;
     
-    // Reverse geocode to get address
     fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
         .then(res => res.json())
         .then(data => {
@@ -1577,7 +1717,7 @@ function render(){
     if(!c) return;
     
     if(step === 'login'){
-        c.innerHTML = '<div class="card"><h2><i class="fas fa-sign-in-alt"></i> Welcome back</h2><div class="subtitle">Sign in to discover amazing street food near you</div><div class="input-group"><input type="text" id="loginIdentifier" placeholder="Email or Phone number"></div><div class="input-group"><input type="password" id="loginPassword" placeholder="Password"><span class="toggle-pwd" onclick="togglePwd(\'loginPassword\')"><i class="fas fa-eye"></i></span></div><button onclick="handleLogin()"><i class="fas fa-sign-in-alt"></i> Sign in</button><button class="secondary" onclick="resetReg()"><i class="fas fa-user-plus"></i> Create new account</button></div>';
+        c.innerHTML = '<div class="card"><h2><i class="fas fa-sign-in-alt"></i> Welcome back</h2><div class="subtitle">Sign in to discover amazing street food near you</div><div class="input-group"><input type="text" id="loginIdentifier" placeholder="Email or Phone number" value="'+savedIdentifier+'"></div><div class="input-group"><input type="password" id="loginPassword" placeholder="Password" value="'+savedPassword+'"><span class="toggle-pwd" onclick="togglePwd(\'loginPassword\')"><i class="fas fa-eye"></i></span></div><button onclick="handleLogin()"><i class="fas fa-sign-in-alt"></i> Sign in</button><button class="secondary" onclick="resetReg()"><i class="fas fa-user-plus"></i> Create new account</button></div>';
     }
     else if(step === 'register'){
         let current = questions[q];
@@ -1661,7 +1801,7 @@ function render(){
         }
         
         if(isLast){
-            html += '<div class="checkbox-row"><input type="checkbox" id="eula" '+(regData.agreedToEula?'checked':'')+' onchange="regData.agreedToEula=this.checked"> <span>I agree to the <a href="#" onclick="showEULA();return false" style="color:#2d8c3c">Terms of Service</a></span></div>';
+            html += '<div class="checkbox-row"><input type="checkbox" id="eula" onchange="regData.agreedToEula=this.checked"> <span>I agree to the <a href="#" onclick="showEULA()" style="color:#2d8c3c">Terms of Service</a></span></div>';
         }
         
         html += '<div class="flex">'+(q>0?'<button class="secondary" onclick="prev()"><i class="fas fa-arrow-left"></i> Back</button>':'')+'<button onclick="next(\''+current+'\')">'+(isLast?'<i class="fas fa-check"></i> Create account':'<i class="fas fa-arrow-right"></i> Continue')+'</button></div></div>';
@@ -1807,10 +1947,6 @@ function next(qName){
     }
 }
 
-function showEULA(){
-    alert("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📜 LAKO TERMS OF SERVICE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1. You must be 18 years or older\n2. Keep your account secure\n3. Location used only for finding vendors\n4. Your data is never sold\n5. Vendors must provide accurate info\n6. You may delete your account anytime\n7. Support: support@lako.app\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBy continuing, you agree.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-}
-
 function skipPhoto(type){
     if(type === 'photo'){
         regData.skippedPhoto = true;
@@ -1882,7 +2018,7 @@ function removePhoto(type){
 async function register(){
     showLoading(true, 'Creating your account...');
     
-    let endpoint = userRole === 'customer' ? '/api/auth/register/customer' : '/api/auth/register/vendor';
+    let endpoint = userRole === 'customer' ? '/api/auth/register/customer' : (userRole === 'vendor' ? '/api/auth/register/vendor' : '/api/auth/register/admin');
     
     let body;
     if(userRole === 'customer'){
@@ -1899,7 +2035,7 @@ async function register(){
             body.email = regData.email;
             body.phone = null;
         }
-    } else {
+    } else if(userRole === 'vendor') {
         body = {
             business_name: regData.business_name,
             user_name: regData.full_name,
@@ -1918,6 +2054,12 @@ async function register(){
             body.email = regData.email;
             body.phone = null;
         }
+    } else {
+        body = {
+            email: regData.email,
+            password: regData.password,
+            full_name: 'Admin User'
+        };
     }
     
     let res = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -1930,7 +2072,16 @@ async function register(){
     } else if(res.ok){
         localStorage.setItem('session_token', data.session_token);
         localStorage.setItem('user_role', userRole);
-        window.location.href = userRole === 'customer' ? '/customer' : '/vendor';
+        
+        if (userRole === 'admin') {
+            window.location.href = '/admin';
+        } else if (userRole === 'customer') {
+            window.location.href = '/customer';
+        } else if (userRole === 'vendor') {
+            window.location.href = '/vendor';
+        } else {
+            window.location.href = '/auth';
+        }
     } else {
         showToast(data.error || 'Registration failed');
     }
@@ -1996,21 +2147,46 @@ function checkConfirmMatch(){
 async function handleLogin(){
     let identifier = document.getElementById('loginIdentifier').value;
     let password = document.getElementById('loginPassword').value;
-    if(!identifier || !password){ showToast('Please enter email/phone and password'); return; }
+    
+    if(!identifier || !password){ 
+        showErrorModal('Please enter both email/phone and password.', identifier, password);
+        return; 
+    }
+    
     showLoading(true, 'Signing in...');
     
     let isPhone = /^\d{10}$/.test(identifier);
     let body = isPhone ? { phone: '+63'+identifier, password: password } : { email: identifier, password: password };
     
-    let res = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    let data = await res.json();
-    showLoading(false);
-    if(res.ok){
-        localStorage.setItem('session_token', data.session_token);
-        localStorage.setItem('user_role', data.role);
-        window.location.href = data.role === 'customer' ? '/customer' : '/vendor';
-    } else {
-        showToast(data.error || 'Invalid login');
+    try {
+        let res = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        let data = await res.json();
+        showLoading(false);
+        
+        if(res.ok){
+            // Clear saved failed login attempts on success
+            localStorage.removeItem('saved_login_identifier');
+            localStorage.removeItem('saved_login_password');
+            
+            localStorage.setItem('session_token', data.session_token);
+            localStorage.setItem('user_role', data.role);
+            
+            if (data.role === 'admin') {
+                window.location.href = '/admin';
+            } else if (data.role === 'customer') {
+                window.location.href = '/customer';
+            } else if (data.role === 'vendor') {
+                window.location.href = '/vendor';
+            } else {
+                window.location.href = '/auth';
+            }
+        } else {
+            // Show error modal and save failed inputs for retry
+            showErrorModal(data.error || 'Invalid credentials. Please check your email/phone and password.', identifier, password);
+        }
+    } catch (error) {
+        showLoading(false);
+        showErrorModal('Network error. Please check your connection.', identifier, password);
     }
 }
 
@@ -2042,7 +2218,16 @@ async function verifyOTP(){
     if(res.ok){
         localStorage.setItem('session_token', data.session_token);
         localStorage.setItem('user_role', userRole);
-        window.location.href = userRole === 'customer' ? '/customer' : '/vendor';
+        
+        if (userRole === 'admin') {
+            window.location.href = '/admin';
+        } else if (userRole === 'customer') {
+            window.location.href = '/customer';
+        } else if (userRole === 'vendor') {
+            window.location.href = '/vendor';
+        } else {
+            window.location.href = '/auth';
+        }
     } else {
         showToast('Invalid code');
     }
@@ -4250,36 +4435,58 @@ body{background:#f8faf8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
 .app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
 .menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
-.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px)}
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto}
-.nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer}
+.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:80px}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05);z-index:99}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer;transition:all 0.2s}
 .nav-item i{font-size:22px}
 .nav-item.active{color:#2d8c3c}
-.card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03)}
+.nav-item span{font-size:11px;font-weight:500}
+.card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03);border:0.5px solid rgba(0,0,0,0.03);cursor:pointer;transition:all 0.2s}
+.card:active{transform:scale(0.98)}
 .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px}
 .stat-card{background:linear-gradient(135deg,#2d8c3c,#1a6b28);border-radius:20px;padding:16px;text-align:center;color:white}
 .stat-value{font-size:28px;font-weight:800}
-.stat-label{font-size:12px;opacity:0.9}
+.stat-label{font-size:12px;opacity:0.9;margin-top:4px}
 .chart-container{background:white;border-radius:20px;padding:16px;margin-bottom:20px}
 .search-bar{background:white;border:1px solid #e0e8e0;border-radius:30px;padding:10px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px}
 .search-bar i{color:#8ba88b}
 .search-bar input{flex:1;border:none;background:transparent;font-size:15px;outline:none}
 .btn-outline{background:white;border:1px solid #2d8c3c;color:#2d8c3c;padding:6px 14px;border-radius:30px;font-size:12px;cursor:pointer}
+.btn{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:30px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s}
+.btn:active{transform:scale(0.97)}
+.btn-sm{padding:6px 12px;font-size:12px;width:auto}
 .flex{display:flex}
 .justify-between{justify-content:space-between}
 .items-center{align-items:center}
 .gap-2{gap:8px}
+.gap-3{gap:12px}
+.mt-1{margin-top:4px}
 .mt-2{margin-top:8px}
+.mt-3{margin-top:12px}
 .mt-4{margin-top:16px}
+.mb-2{margin-bottom:8px}
 .text-secondary{color:#8ba88b;font-size:12px}
 .text-center{text-align:center}
 .hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
 .hamburger-menu.show{right:0}
-.menu-item{padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px}
+.menu-item{padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px;font-size:14px}
 .menu-item:hover{background:#f0f4f0}
 .menu-divider{height:1px;background:#e8ece8;margin:12px 0}
 .loading{text-align:center;padding:40px;color:#8ba88b}
-.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:12px;border-radius:30px;text-align:center;z-index:1000}
+.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:12px;border-radius:30px;text-align:center;z-index:1000;font-size:13px}
+.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal.show{display:flex}
+.modal-content{background:white;border-radius:24px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;z-index:1001}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:18px;font-weight:700;color:#1a2e1a}
+.modal-close{font-size:24px;cursor:pointer;color:#8ba88b;padding:8px}
+.input{width:100%;padding:12px 14px;border:1px solid #e0e8e0;border-radius:14px;font-size:14px;margin-bottom:12px;background:#f8faf8}
+.input:focus{outline:none;border-color:#2d8c3c}
+textarea.input{min-height:80px;resize:vertical}
+.product-card{background:#f8faf8;border-radius:16px;padding:12px;margin-bottom:10px}
+.product-name{font-weight:600;color:#1a2e1a}
+.product-price{color:#2d8c3c;font-weight:700}
+.image-preview{width:60px;height:60px;border-radius:8px;object-fit:cover}
+.close-hamburger{position:absolute;top:20px;right:20px;background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#2d8c3c}
 </style>
 
 <div class="app-bar">
@@ -4289,6 +4496,7 @@ body{background:#f8faf8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 </div>
 
 <div id="hamburgerMenu" class="hamburger-menu">
+    <button class="close-hamburger" onclick="toggleMenu()"><i class="fas fa-times"></i></button>
     <div class="menu-item" onclick="showStats()"><i class="fas fa-chart-line"></i> Dashboard</div>
     <div class="menu-item" onclick="showUsers()"><i class="fas fa-users"></i> Users</div>
     <div class="menu-item" onclick="showVendors()"><i class="fas fa-store"></i> Vendors</div>
@@ -4304,8 +4512,73 @@ body{background:#f8faf8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 
 <div class="content" id="content"></div>
 
+<!-- Vendor Products Modal -->
+<div class="modal" id="vendorProductsModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="vendorProductsTitle"><i class="fas fa-store"></i> Vendor Products</h3>
+            <span class="modal-close" onclick="closeVendorProductsModal()">&times;</span>
+        </div>
+        <div id="vendorProductsBody">
+            <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading products...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Product Modal -->
+<div class="modal" id="adminProductModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="adminProductModalTitle">Add Product</h3>
+            <span class="modal-close" onclick="closeAdminProductModal()">&times;</span>
+        </div>
+        <div id="adminProductModalBody">
+            <input type="text" id="adminProdName" class="input" placeholder="Product name *">
+            <textarea id="adminProdDesc" class="input" placeholder="Description"></textarea>
+            <select id="adminProdCategory" class="input">
+                <option value="">Select Category</option>
+                <option value="Coffee">Coffee</option>
+                <option value="Pancit">Pancit</option>
+                <option value="Tusok Tusok">Tusok Tusok</option>
+                <option value="Contemporary Street food">Contemporary Street food</option>
+                <option value="Bread and Pastry">Bread and Pastry</option>
+                <option value="Lomi">Lomi</option>
+                <option value="Beverage">Beverage</option>
+                <option value="Sarisari Store">Sarisari Store</option>
+                <option value="Karendirya">Karendirya</option>
+                <option value="Traditional Desserts">Traditional Desserts</option>
+                <option value="Contemporary Desserts">Contemporary Desserts</option>
+                <option value="Squidball">Squidball</option>
+                <option value="Siomai">Siomai</option>
+                <option value="Siopao">Siopao</option>
+                <option value="Taho">Taho</option>
+                <option value="Fruit shakes">Fruit shakes</option>
+            </select>
+            <div class="flex gap-2">
+                <input type="number" id="adminProdPrice" class="input" placeholder="Price (₱) *" step="0.01">
+            </div>
+            <div class="upload-area" onclick="document.getElementById('adminProdImages').click()" style="background:#f8faf8;border:1px dashed #c0d0c0;border-radius:16px;padding:16px;text-align:center;cursor:pointer;margin:12px 0">
+                <i class="fas fa-image" style="font-size:24px;color:#2d8c3c"></i>
+                <div>Add Product Images</div>
+            </div>
+            <input type="file" id="adminProdImages" multiple accept="image/*" style="display:none" onchange="previewAdminProductImages(this)">
+            <div id="adminProductImagePreview" class="product-images-container" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+            <div class="flex gap-2 mt-4">
+                <button class="btn" onclick="saveAdminProduct()"><i class="fas fa-save"></i> Save Product</button>
+                <button class="btn-outline" onclick="closeAdminProductModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 let sessionToken = localStorage.getItem('session_token');
+let adminData = null;
+let currentPage = 'stats';
+let currentVendorForProducts = null;
+let currentEditingProduct = null;
+let adminProductImages = [];
+
 if (!sessionToken) window.location.href = '/auth';
 
 function showToast(msg){
@@ -4327,10 +4600,26 @@ async function api(url, options = {}) {
     return res.json();
 }
 
+async function loadAdminProfile() {
+    const data = await api('/api/admin/profile');
+    if (data) { adminData = data; }
+}
+
 async function showStats() {
+    currentPage = 'stats';
     document.getElementById('content').innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading stats...</div>';
     const data = await api('/api/admin/stats');
     document.getElementById('content').innerHTML = `
+        <div class="card" style="background:linear-gradient(135deg,#2d8c3c,#1a6b28);color:white;margin-bottom:20px">
+            <div class="flex items-center gap-3">
+                <div style="font-size:48px"><i class="fas fa-user-shield"></i></div>
+                <div>
+                    <p style="opacity:0.9;font-size:13px">Welcome back,</p>
+                    <h2 style="font-size:22px">${adminData?.full_name || 'Admin'}!</h2>
+                    <p style="opacity:0.9;font-size:12px">System Administrator</p>
+                </div>
+            </div>
+        </div>
         <div class="stats-grid">
             <div class="stat-card"><div class="stat-value">${data.total_users || 0}</div><div class="stat-label">Total Users</div></div>
             <div class="stat-card"><div class="stat-value">${data.total_vendors || 0}</div><div class="stat-label">Total Vendors</div></div>
@@ -4346,9 +4635,11 @@ async function showStats() {
             options: { responsive: true }
         });
     }, 100);
+    updateActiveNav('stats');
 }
 
 async function showUsers() {
+    currentPage = 'users';
     document.getElementById('content').innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading users...</div>';
     const data = await api('/api/admin/users');
     document.getElementById('content').innerHTML = `
@@ -4361,6 +4652,7 @@ async function showUsers() {
                 </div>
             </div>
         `).join('') || '<div class="card text-center text-secondary">No users found</div>'}</div>`;
+    updateActiveNav('users');
 }
 
 function filterUsers() {
@@ -4371,18 +4663,23 @@ function filterUsers() {
 }
 
 async function showVendors() {
+    currentPage = 'vendors';
     document.getElementById('content').innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading vendors...</div>';
     const data = await api('/api/admin/vendors');
     document.getElementById('content').innerHTML = `
         <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="vendorSearch" placeholder="Search vendors..." oninput="filterVendorList()"></div>
         <div id="vendorsList">${(data.vendors || []).map(v => `
-            <div class="card" data-name="${v.business_name.toLowerCase()}">
+            <div class="card" data-name="${v.business_name.toLowerCase()}" data-id="${v.id}">
                 <div class="flex justify-between items-center">
-                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary">${v.category} • ${v.is_active ? 'Active' : 'Inactive'} • Rating: ${v.rating || 'New'}</span><br><small>Owner ID: ${v.user_id?.slice(0,8)}...</small></div>
-                    <button class="btn-outline" onclick="toggleVendor('${v.id}', ${v.is_active})"><i class="fas ${v.is_active ? 'fa-ban' : 'fa-check-circle'}"></i> ${v.is_active ? 'Disable' : 'Enable'}</button>
+                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary">${v.category} • ${v.is_active ? 'Active' : 'Inactive'} • Rating: ${v.rating || 'New'}</span><br><small>Owner: ${v.user_name || 'N/A'}</small></div>
+                    <div class="flex gap-2">
+                        <button class="btn-outline" onclick="event.stopPropagation(); openVendorProducts('${v.id}', '${v.business_name}')"><i class="fas fa-utensils"></i> Products</button>
+                        <button class="btn-outline" onclick="event.stopPropagation(); toggleVendor('${v.id}', ${v.is_active})"><i class="fas ${v.is_active ? 'fa-ban' : 'fa-check-circle'}"></i> ${v.is_active ? 'Disable' : 'Enable'}</button>
+                    </div>
                 </div>
             </div>
         `).join('') || '<div class="card text-center text-secondary">No vendors found</div>'}</div>`;
+    updateActiveNav('vendors');
 }
 
 function filterVendorList() {
@@ -4390,6 +4687,136 @@ function filterVendorList() {
     document.querySelectorAll('#vendorsList .card').forEach(card => {
         card.style.display = card.dataset.name.includes(query) ? 'block' : 'none';
     });
+}
+
+async function openVendorProducts(vendorId, vendorName) {
+    currentVendorForProducts = vendorId;
+    document.getElementById('vendorProductsTitle').innerHTML = `<i class="fas fa-store"></i> ${vendorName} - Products`;
+    document.getElementById('vendorProductsBody').innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading products...</div>';
+    document.getElementById('vendorProductsModal').classList.add('show');
+    
+    const products = await api(`/api/admin/vendor/${vendorId}/products`);
+    renderVendorProducts(products);
+}
+
+function renderVendorProducts(products) {
+    const container = document.getElementById('vendorProductsBody');
+    container.innerHTML = `
+        <button class="btn mb-3" onclick="openAddProductForVendor()"><i class="fas fa-plus"></i> Add Product</button>
+        <div id="vendorProductsList">
+            ${(products || []).map(p => `
+                <div class="product-card">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <div class="product-name">${p.name}</div>
+                            <div class="product-price">₱${p.price}</div>
+                            <div class="text-secondary" style="font-size:11px">${p.category || 'Uncategorized'}</div>
+                            ${p.description ? `<div class="text-secondary mt-1" style="font-size:11px">${p.description.substring(0, 60)}${p.description.length > 60 ? '...' : ''}</div>` : ''}
+                        </div>
+                        ${p.images && p.images[0] ? `<img src="${p.images[0].thumbnail}" class="image-preview" style="width:50px;height:50px;object-fit:cover;border-radius:8px">` : `<div style="width:50px;height:50px;background:#f0f4f0;border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="fas fa-utensils"></i></div>`}
+                    </div>
+                    <div class="flex gap-2 mt-3">
+                        <button class="btn-outline btn-sm" onclick="editProductForVendor('${p.id}', '${p.name}', '${p.description || ''}', '${p.category || ''}', ${p.price})"><i class="fas fa-edit"></i> Edit</button>
+                        <button class="btn-outline btn-sm" onclick="deleteProductForVendor('${p.id}')"><i class="fas fa-trash"></i> Delete</button>
+                    </div>
+                </div>
+            `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No products for this vendor</div>'}
+        </div>
+    `;
+}
+
+function openAddProductForVendor() {
+    currentEditingProduct = null;
+    document.getElementById('adminProductModalTitle').innerText = 'Add Product';
+    document.getElementById('adminProdName').value = '';
+    document.getElementById('adminProdDesc').value = '';
+    document.getElementById('adminProdCategory').value = '';
+    document.getElementById('adminProdPrice').value = '';
+    document.getElementById('adminProductImagePreview').innerHTML = '';
+    adminProductImages = [];
+    document.getElementById('adminProductModal').classList.add('show');
+}
+
+function editProductForVendor(productId, name, description, category, price) {
+    currentEditingProduct = productId;
+    document.getElementById('adminProductModalTitle').innerText = 'Edit Product';
+    document.getElementById('adminProdName').value = name;
+    document.getElementById('adminProdDesc').value = description || '';
+    document.getElementById('adminProdCategory').value = category || '';
+    document.getElementById('adminProdPrice').value = price;
+    document.getElementById('adminProductImagePreview').innerHTML = '';
+    adminProductImages = [];
+    document.getElementById('adminProductModal').classList.add('show');
+}
+
+function previewAdminProductImages(input) {
+    const previewDiv = document.getElementById('adminProductImagePreview');
+    previewDiv.innerHTML = '';
+    for (let i = 0; i < input.files.length; i++) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            previewDiv.innerHTML += `<div class="image-preview"><img src="${e.target.result}" style="width:70px;height:70px;object-fit:cover;border-radius:8px"></div>`;
+        };
+        reader.readAsDataURL(input.files[i]);
+    }
+}
+
+async function saveAdminProduct() {
+    const name = document.getElementById('adminProdName').value.trim();
+    const price = parseFloat(document.getElementById('adminProdPrice').value);
+    
+    if (!name || !price) {
+        showToast('Name and price are required!');
+        return;
+    }
+    
+    const images = [];
+    const fileInput = document.getElementById('adminProdImages');
+    for (let i = 0; i < fileInput.files.length; i++) {
+        const reader = new FileReader();
+        const imgData = await new Promise((resolve) => {
+            reader.onload = (e) => resolve(e.target.result);
+            reader.readAsDataURL(fileInput.files[i]);
+        });
+        images.push(imgData);
+    }
+    
+    const productData = {
+        vendor_id: currentVendorForProducts,
+        name: name,
+        description: document.getElementById('adminProdDesc').value,
+        category: document.getElementById('adminProdCategory').value,
+        price: price,
+        stock: 0,
+        images: images
+    };
+    
+    if (currentEditingProduct) {
+        productData.product_id = currentEditingProduct;
+    }
+    
+    const endpoint = currentEditingProduct ? '/api/admin/product/update' : '/api/admin/product/create';
+    const res = await api(endpoint, { method: 'POST', body: JSON.stringify(productData) });
+    
+    if (res && res.success) {
+        showToast(currentEditingProduct ? 'Product updated!' : 'Product created!');
+        closeAdminProductModal();
+        openVendorProducts(currentVendorForProducts, '');
+    } else {
+        showToast('Failed to save product');
+    }
+}
+
+async function deleteProductForVendor(productId) {
+    if (confirm('Delete this product permanently?')) {
+        const res = await api('/api/admin/product/delete', { method: 'POST', body: JSON.stringify({ product_id: productId }) });
+        if (res && res.success) {
+            showToast('Product deleted');
+            openVendorProducts(currentVendorForProducts, '');
+        } else {
+            showToast('Failed to delete product');
+        }
+    }
 }
 
 async function suspendUser(userId, currentlySuspended) {
@@ -4404,22 +4831,37 @@ async function toggleVendor(vendorId, active) {
     showVendors();
 }
 
-function toggleMenu() { document.getElementById('hamburgerMenu').classList.toggle('show'); }
+function closeVendorProductsModal() {
+    document.getElementById('vendorProductsModal').classList.remove('show');
+    currentVendorForProducts = null;
+}
+
+function closeAdminProductModal() {
+    document.getElementById('adminProductModal').classList.remove('show');
+    currentEditingProduct = null;
+    adminProductImages = [];
+}
+
+function updateActiveNav(page) {
+    document.querySelectorAll('.nav-item').forEach((el, i) => {
+        const pages = ['stats', 'users', 'vendors'];
+        el.classList.toggle('active', pages[i] === page);
+    });
+}
+
+function toggleMenu() { 
+    document.getElementById('hamburgerMenu').classList.toggle('show'); 
+}
+
 function logout() { localStorage.clear(); window.location.href = '/'; }
 
 let fa=document.createElement('link');fa.rel='stylesheet';fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';document.head.appendChild(fa);
 let chartScript=document.createElement('script');chartScript.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';document.head.appendChild(chartScript);
 
+loadAdminProfile();
 showStats();
 </script>
 ''')
-# ============================================
-# API ROUTES
-# ============================================
-
-# ============================================
-# PAGE ROUTES - REPLACE the placeholder routes with these
-# ============================================
 
 @app.route('/')
 def index(): 
@@ -4650,6 +5092,59 @@ def verify_otp_route():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ============================================
+# ADMIN API ENDPOINTS - ADD THESE TO server.py
+# ============================================
+
+@app.route('/api/admin/stats', methods=['GET'])
+def admin_stats():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    return jsonify(get_admin_stats())
+
+@app.route('/api/admin/users', methods=['GET'])
+def admin_users():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    users = get_all_users_admin()
+    return jsonify({'users': users})
+
+@app.route('/api/admin/vendors', methods=['GET'])
+def admin_vendors():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    vendors = get_all_vendors_admin()
+    return jsonify({'vendors': vendors})
+
+@app.route('/api/admin/user/suspend', methods=['POST'])
+def admin_suspend_user():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    if data.get('suspend'):
+        suspend_user(data.get('user_id'))
+    else:
+        unsuspend_user(data.get('user_id'))
+    return jsonify({'success': True})
+
+@app.route('/api/admin/vendor/toggle', methods=['POST'])
+def admin_toggle_vendor():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    toggle_vendor_active(data.get('vendor_id'), data.get('active'))
+    return jsonify({'success': True})
 
 @app.route('/api/auth/check-otp', methods=['GET'])
 def check_otp():
@@ -5612,6 +6107,80 @@ def update_location_route():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    
+# ============================================
+# ADMIN ADDITIONAL ENDPOINTS
+# ============================================
+
+@app.route('/api/admin/profile', methods=['GET'])
+def get_admin_profile():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    user = get_user_by_id(session['user_id'])
+    return jsonify({
+        'full_name': user.get('full_name', 'Admin'),
+        'email': user.get('email', '')
+    })
+
+@app.route('/api/admin/vendor/<vendor_id>/products', methods=['GET'])
+def admin_get_vendor_products(vendor_id):
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    products = get_products_by_vendor(vendor_id)
+    return jsonify(products)
+
+@app.route('/api/admin/product/create', methods=['POST'])
+def admin_create_product():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    product_id = create_product(
+        data.get('vendor_id'),
+        data.get('name'),
+        data.get('description'),
+        data.get('category'),
+        data.get('price'),
+        data.get('images', []),
+        0
+    )
+    
+    if product_id:
+        return jsonify({'success': True, 'product_id': product_id})
+    return jsonify({'error': 'Failed to create product'}), 500
+
+@app.route('/api/admin/product/update', methods=['POST'])
+def admin_update_product():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    success = update_product(data.get('product_id'), {
+        'name': data.get('name'),
+        'description': data.get('description'),
+        'category': data.get('category'),
+        'price': data.get('price'),
+        'stock': 0,
+        'images': data.get('images', [])
+    })
+    
+    return jsonify({'success': success})
+
+@app.route('/api/admin/product/delete', methods=['POST'])
+def admin_delete_product():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    success = delete_product(data.get('product_id'))
+    return jsonify({'success': success})
 # ============================================
 # RUN APP
 # ============================================

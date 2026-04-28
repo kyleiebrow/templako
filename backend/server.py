@@ -3574,19 +3574,23 @@ VENDOR_DASH = render_page("Vendor Dashboard", '''
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 .app-bar{background:white;padding:16px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
+.back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c;transition:all 0.2s}
+.back-btn:active{transform:scale(0.95);background:#e8f5e9}
 .app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
-.menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
+.menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c;transition:all 0.2s}
+.menu-btn:active{transform:scale(0.95);background:#e8f5e9}
 .content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:80px}
 .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05);z-index:99}
 .nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer;transition:all 0.2s}
 .nav-item i{font-size:22px}
 .nav-item.active{color:#2d8c3c}
 .nav-item span{font-size:11px;font-weight:500}
-.card{background:white;border-radius:24px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
+.card{background:white;border-radius:24px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);transition:all 0.2s}
+.card:active{transform:scale(0.98)}
 .btn{width:100%;padding:14px;background:#2d8c3c;color:white;border:none;border-radius:44px;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.2s}
 .btn:active{transform:scale(0.97);background:#1a6b28}
 .btn-outline{background:white;border:1.5px solid #2d8c3c;color:#2d8c3c;padding:12px;border-radius:44px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}
+.btn-outline:active{transform:scale(0.97);background:#e8f5e9}
 .btn-sm{padding:8px 16px;font-size:13px;width:auto}
 .badge{background:#f0f4f0;padding:4px 12px;border-radius:20px;font-size:12px;color:#1a2e1a}
 .text-secondary{color:#8ba88b;font-size:13px}
@@ -3621,21 +3625,25 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .hours-value{font-size:13px;color:#2d8c3c;font-weight:600}
 .modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
 .modal.show{display:flex}
-.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px}
+.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;position:relative}
 .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#1a2e1a}
-.modal-close{font-size:28px;cursor:pointer;color:#8ba88b}
+.modal-close{font-size:28px;cursor:pointer;color:#8ba88b;padding:8px;border-radius:50%}
+.modal-close:active{background:#f0f4f0}
 .hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
 .hamburger-menu.show{right:0}
-.menu-item{padding:16px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px}
-.menu-item:hover{background:#f0f4f0}
+.close-hamburger{position:absolute;top:20px;right:20px;background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#2d8c3c;display:flex;align-items:center;justify-content:center}
+.close-hamburger:active{transform:scale(0.95);background:#e8f5e9}
+.menu-item{padding:16px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px;font-size:14px;transition:all 0.2s}
+.menu-item:active{background:#f0f4f0}
 .menu-divider{height:1px;background:#e8ece8;margin:12px 0}
 .loading{text-align:center;padding:40px;color:#8ba88b}
 .loading i{font-size:32px;margin-bottom:12px;display:block}
-.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:14px;border-radius:50px;text-align:center;z-index:1000}
+.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:14px;border-radius:50px;text-align:center;z-index:1000;animation:fadeInUp 0.3s ease}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 .input{width:100%;padding:14px 16px;border:1.5px solid #e0e8e0;border-radius:14px;font-size:15px;margin-bottom:12px;background:#f8faf8}
 .input:focus{outline:none;border-color:#2d8c3c;background:white}
 .category-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:12px 0}
-.category-chip{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:40px;padding:10px;text-align:center;cursor:pointer;font-size:13px}
+.category-chip{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:40px;padding:10px;text-align:center;cursor:pointer;font-size:13px;transition:all 0.2s}
 .category-chip.selected{background:#2d8c3c;color:white;border-color:#2d8c3c}
 .product-images-container{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .image-preview{position:relative;width:80px;height:80px}
@@ -3645,12 +3653,15 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .location-badge{background:#f8faf8;border-radius:12px;padding:12px;margin:12px 0;display:flex;align-items:center;gap:12px;border:1px solid #e0e8e0}
 .location-badge i{color:#2d8c3c;font-size:18px}
 .location-text{flex:1;font-size:13px}
-.refresh-loc{background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer}
-.confirm-loc{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:40px;cursor:pointer;margin-top:12px}
+.refresh-loc{background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;transition:all 0.2s}
+.refresh-loc:active{transform:scale(0.95);background:#e8f5e9}
+.confirm-loc{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:40px;cursor:pointer;margin-top:12px;transition:all 0.2s}
+.confirm-loc:active{transform:scale(0.95)}
 .stars{color:#ffb800;letter-spacing:2px}
-.post-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px}
+.post-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;transition:all 0.2s}
+.post-card:active{transform:scale(0.98)}
 .post-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.post-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:20px}
+.post-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;object-fit:cover}
 .post-content{font-size:14px;color:#1a2e1a;margin-bottom:12px;line-height:1.5}
 .post-images{display:flex;gap:8px;margin-bottom:12px;overflow-x:auto}
 .post-image{width:100px;height:100px;border-radius:12px;object-fit:cover}
@@ -3679,25 +3690,33 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .tutorial-step .feature-list li{padding:8px 0;display:flex;align-items:center;gap:10px;font-size:13px;color:#1a2e1a}
 .tutorial-step .feature-list li i{width:24px;color:#2d8c3c}
 .tutorial-dots{display:flex;justify-content:center;gap:8px;margin:20px 0}
-.tutorial-dot{width:8px;height:8px;background:#e0e8e0;border-radius:50%;cursor:pointer}
+.tutorial-dot{width:8px;height:8px;background:#e0e8e0;border-radius:50%;cursor:pointer;transition:all 0.3s}
 .tutorial-dot.active{background:#2d8c3c;width:24px;border-radius:12px}
 .business-logo{width:60px;height:60px;border-radius:50%;object-fit:cover;background:#f0f4f0}
-.upload-area{background:#f8faf8;border:2px dashed #c0d0c0;border-radius:16px;padding:20px;text-align:center;cursor:pointer;margin:12px 0}
+.upload-area{background:#f8faf8;border:2px dashed #c0d0c0;border-radius:16px;padding:20px;text-align:center;cursor:pointer;margin:12px 0;transition:all 0.2s}
+.upload-area:active{background:#f0f4f0}
 .upload-area i{font-size:28px;color:#2d8c3c;margin-bottom:8px;display:block}
+.confirm-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px}
+.confirm-content{background:white;border-radius:28px;max-width:320px;width:100%;padding:24px;text-align:center}
+.confirm-content h3{margin-bottom:12px;color:#1a2e1a}
+.confirm-content p{margin-bottom:20px;color:#6b8c6b}
+.confirm-buttons{display:flex;gap:12px}
+.confirm-buttons button{flex:1}
 </style>
 
 <div class="app-bar">
-    <button class="back-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i></button>
+    <button class="back-btn" onclick="confirmLogout()"><i class="fas fa-sign-out-alt"></i></button>
     <div class="app-bar-title">Vendor Dashboard</div>
     <button class="menu-btn" onclick="toggleMenu()"><i class="fas fa-bars"></i></button>
 </div>
 
 <div id="hamburgerMenu" class="hamburger-menu">
+    <button class="close-hamburger" onclick="toggleMenu()"><i class="fas fa-times"></i></button>
     <div class="menu-item" onclick="showAnalytics()"><i class="fas fa-chart-line"></i> Analytics</div>
     <div class="menu-divider"></div>
     <div class="menu-item" onclick="showTutorial()"><i class="fas fa-question-circle"></i> Tutorial</div>
     <div class="menu-divider"></div>
-    <div class="menu-item" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
+    <div class="menu-item" onclick="confirmLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
 </div>
 
 <div class="bottom-nav">
@@ -3705,6 +3724,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     <div class="nav-item" onclick="showPage('products')"><i class="fas fa-utensils"></i><span>Menu</span></div>
     <div class="nav-item" onclick="showPage('reviews')"><i class="fas fa-star"></i><span>Reviews</span></div>
     <div class="nav-item" onclick="showPage('posts')"><i class="fas fa-newspaper"></i><span>Posts</span></div>
+    <div class="nav-item" onclick="showPage('profile')"><i class="fas fa-user"></i><span>Profile</span></div>
     <div class="nav-item" onclick="showPage('settings')"><i class="fas fa-sliders-h"></i><span>Settings</span></div>
 </div>
 
@@ -3717,7 +3737,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     </div>
 </div>
 
-<!-- Other Modals -->
+<!-- Product Modal -->
 <div class="modal" id="productModal">
     <div class="modal-content">
         <div class="modal-header"><h3 id="modalTitle">Add Product</h3><span class="modal-close" onclick="closeProductModal()">&times;</span></div>
@@ -3725,6 +3745,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     </div>
 </div>
 
+<!-- Hours Modal -->
 <div class="modal" id="hoursModal">
     <div class="modal-content">
         <div class="modal-header"><h3>Set Operating Hours</h3><span class="modal-close" onclick="closeHoursModal()">&times;</span></div>
@@ -3732,6 +3753,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     </div>
 </div>
 
+<!-- Analytics Modal -->
 <div class="modal" id="analyticsModal">
     <div class="modal-content">
         <div class="modal-header"><h3>Business Analytics</h3><span class="modal-close" onclick="closeAnalyticsModal()">&times;</span></div>
@@ -3739,6 +3761,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     </div>
 </div>
 
+<!-- Post Modal -->
 <div class="modal" id="postModal">
     <div class="modal-content">
         <div class="modal-header"><h3>Create Post</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div>
@@ -3754,6 +3777,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     </div>
 </div>
 
+<!-- Location Modal -->
 <div class="modal" id="locationModal">
     <div class="modal-content">
         <div class="modal-header"><h3>Update Business Location</h3><span class="modal-close" onclick="closeLocationModal()">&times;</span></div>
@@ -3763,6 +3787,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
     </div>
 </div>
 
+<!-- Logo Modal -->
 <div class="modal" id="logoModal">
     <div class="modal-content">
         <div class="modal-header"><h3>Update Business Logo</h3><span class="modal-close" onclick="closeLogoModal()">&times;</span></div>
@@ -3783,6 +3808,7 @@ let vendorData = null, products = [], posts = [], locationMap = null, locationMa
 let salesChart = null, trafficChart = null;
 let isOpen = false;
 let openStatusInterval = null;
+let vendorProfile = null;
 
 if (!sessionToken) window.location.href = '/auth';
 
@@ -3803,13 +3829,22 @@ async function api(url, options = {}) {
         ...options,
         headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken, ...options.headers }
     });
-    if (res.status === 401) { localStorage.clear(); window.location.href = '/auth'; return null; }
+    if (res.status === 401) { 
+        localStorage.clear(); 
+        window.location.href = '/auth'; 
+        return null; 
+    }
     return res.json();
 }
 
 async function loadData() {
     const data = await api('/api/vendor/data');
     if (data) { vendorData = data.vendor; products = data.products || []; posts = data.posts || []; }
+}
+
+async function loadVendorProfile() {
+    const data = await api('/api/vendor/profile');
+    if (data) { vendorProfile = data; }
 }
 
 function checkOpenStatus() {
@@ -3847,19 +3882,21 @@ async function toggleOpenStatus() {
 
 function showPage(p) {
     document.querySelectorAll('.nav-item').forEach((el, i) => {
-        const pages = ['dashboard', 'products', 'reviews', 'posts', 'settings'];
+        const pages = ['dashboard', 'products', 'reviews', 'posts', 'profile', 'settings'];
         el.classList.toggle('active', pages[i] === p);
     });
     if (p === 'dashboard') showDashboard();
     else if (p === 'products') showProducts();
     else if (p === 'reviews') showReviews();
     else if (p === 'posts') showPosts();
+    else if (p === 'profile') showProfile();
     else if (p === 'settings') showSettings();
 }
 
 async function showDashboard() {
     document.getElementById('content').innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
     await loadData();
+    await loadVendorProfile();
     
     const analytics = await api('/api/vendor/analytics');
     isOpen = vendorData?.is_open || false;
@@ -3872,7 +3909,7 @@ async function showDashboard() {
                     ${logoUrl ? `<img src="${logoUrl}" class="business-logo" style="width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid white">` : `<div class="business-logo" style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:28px"><i class="fas fa-store"></i></div>`}
                     <div>
                         <p style="opacity:0.9;font-size:13px">Welcome back,</p>
-                        <h2 style="font-size:22px">${vendorData?.user_name || 'Vendor'}!</h2>
+                        <h2 style="font-size:22px">${vendorProfile?.user_name || vendorData?.user_name || 'Vendor'}!</h2>
                         <p style="opacity:0.9;margin-top:2px;font-size:13px">${vendorData?.business_name}</p>
                     </div>
                 </div>
@@ -4206,8 +4243,32 @@ async function deletePost(postId) {
     }
 }
 
+async function showProfile() {
+    await loadVendorProfile();
+    document.getElementById('content').innerHTML = `
+        <div class="card text-center">
+            <div class="business-logo" style="width:100px;height:100px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;font-size:48px">
+                ${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">` : `<i class="fas fa-store"></i>`}
+            </div>
+            <h2>${vendorData?.business_name}</h2>
+            <p class="text-secondary"><i class="fas fa-user"></i> ${vendorProfile?.user_name || vendorData?.user_name || 'Vendor'}</p>
+            <p class="text-secondary"><i class="fas fa-envelope"></i> ${vendorProfile?.email || vendorData?.email}</p>
+            <p class="text-secondary"><i class="fas fa-phone"></i> ${vendorProfile?.phone || vendorData?.phone || 'No phone'}</p>
+            <p class="text-secondary"><i class="fas fa-tag"></i> ${vendorData?.category}</p>
+            <div class="stats-grid mt-4">
+                <div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div>
+                <div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div>
+                <div class="stat-card"><div class="stat-value">${products.length}</div><div class="stat-label">Products</div></div>
+                <div class="stat-card"><div class="stat-value">${posts.length}</div><div class="stat-label">Posts</div></div>
+            </div>
+            <button class="btn-outline mt-3" onclick="showPage('settings')"><i class="fas fa-edit"></i> Edit Profile</button>
+        </div>
+    `;
+}
+
 async function showSettings() {
     await loadData();
+    await loadVendorProfile();
     const hours = vendorData?.operating_hours || {};
     document.getElementById('content').innerHTML = `
         <div class="card">
@@ -4227,7 +4288,7 @@ async function showSettings() {
         </div>
         <div class="card">
             <h3><i class="fas fa-store"></i> Business Info</h3>
-            <p><strong>${vendorData?.business_name}</strong><br><i class="fas fa-tag"></i> ${vendorData?.category}<br><i class="fas fa-phone"></i> ${vendorData?.phone || 'No phone'}<br><i class="fas fa-envelope"></i> ${vendorData?.email}</p>
+            <p><strong>${vendorData?.business_name}</strong><br><i class="fas fa-tag"></i> ${vendorData?.category}<br><i class="fas fa-phone"></i> ${vendorProfile?.phone || vendorData?.phone || 'No phone'}<br><i class="fas fa-envelope"></i> ${vendorProfile?.email || vendorData?.email}</p>
         </div>
     `;
     
@@ -4405,6 +4466,22 @@ function showTutorial() {
     renderStep();
 }
 
+function confirmLogout() {
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal';
+    modal.innerHTML = `
+        <div class="confirm-content">
+            <h3><i class="fas fa-sign-out-alt"></i> Logout</h3>
+            <p>Are you sure you want to logout?</p>
+            <div class="confirm-buttons">
+                <button class="btn-outline" onclick="this.closest('.confirm-modal').remove()">Cancel</button>
+                <button class="btn" onclick="logout()">Logout</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
 function closeProductModal() { document.getElementById('productModal').classList.remove('show'); }
 function closeHoursModal() { document.getElementById('hoursModal').classList.remove('show'); }
 function closeAnalyticsModal() { document.getElementById('analyticsModal').classList.remove('show'); }
@@ -4419,8 +4496,13 @@ let chartScript=document.createElement('script');chartScript.src='https://cdn.js
 let leaflet=document.createElement('link');leaflet.rel='stylesheet';leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(leaflet);
 let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';document.head.appendChild(leafletScript);
 
-if(!localStorage.getItem('tutorial_seen')) setTimeout(showTutorial, 500);
-showDashboard();
+// Check for existing session on page load (no redirect)
+if(sessionToken) {
+    if(!localStorage.getItem('tutorial_seen')) setTimeout(showTutorial, 500);
+    showDashboard();
+} else {
+    window.location.href = '/auth';
+}
 </script>
 ''')
 # ============================================
@@ -5612,9 +5694,20 @@ def add_comment():
     
     return jsonify({'success': True})
 
-# ============================================
-# REVIEWS ENDPOINTS
-# ============================================
+
+
+@app.route('/api/vendor/profile', methods=['GET'])
+def get_vendor_profile():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'vendor':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    user = get_user_by_id(session['user_id'])
+    return jsonify({
+        'user_name': user.get('full_name', ''),
+        'email': user.get('email', ''),
+        'phone': user.get('phone', '')
+    })
 
 @app.route('/api/customer/reviews/<vendor_id>', methods=['GET'])
 def get_customer_reviews(vendor_id):

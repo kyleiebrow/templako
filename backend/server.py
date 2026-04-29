@@ -82,10 +82,53 @@ class NotificationService:
         self.email_enabled = bool(self.brevo_api_key and self.brevo_sender_email)
         self.sms_enabled = bool(self.textbee_api_key and self.textbee_device_id)
         
+        # TextBee base URL
+        self.textbee_base_url = "https://api.textbee.dev/api/v1"
+        
         if self.email_enabled:
             print(f"✓ Brevo email enabled - Sender: {self.brevo_sender_name} <{self.brevo_sender_email}>")
         if self.sms_enabled:
             print(f"✓ TextBee SMS enabled - Device ID: {self.textbee_device_id}")
+    
+    # ============================================
+    # HELPER: Convert phone to local 09 format
+    # ============================================
+    
+    def format_phone_for_sms(self, phone_number):
+        """Convert any phone format to local 09xxxxxxxxx for SMS sending"""
+        if not phone_number:
+            return None
+        
+        # Convert to string and remove all non-digit characters
+        digits = ''.join(filter(str.isdigit, str(phone_number)))
+        
+        # Philippine numbers: convert 63 or +63 to 09
+        if len(digits) == 12 and digits.startswith('63'):
+            # 639xxxxxxxxxx -> 09xxxxxxxxx
+            digits = '0' + digits[2:]
+        elif len(digits) == 13 and digits.startswith('63'):
+            # 639xxxxxxxxxx (with extra digit) -> 09xxxxxxxxx
+            digits = '0' + digits[2:]
+        elif len(digits) == 11 and digits.startswith('09'):
+            # Already correct format
+            pass
+        elif len(digits) == 10 and digits.startswith('9'):
+            # 9xxxxxxxxx -> 09xxxxxxxxx
+            digits = '0' + digits
+        elif len(digits) == 10 and digits.startswith('0'):
+            # 0xxxxxxxxx -> add 9? No, keep as is (09xxxxxxxxx is 11 digits)
+            pass
+        
+        # Ensure we have 11 digits starting with 09
+        if len(digits) == 11 and digits.startswith('09'):
+            return digits
+        else:
+            # Return original if format is unexpected
+            return phone_number
+    
+    # ============================================
+    # EMAIL METHODS
+    # ============================================
     
     def send_email(self, to_email, subject, html_content):
         """Send email using Brevo API"""
@@ -117,137 +160,256 @@ class NotificationService:
             if success:
                 print(f"✓ Email sent to {to_email}")
             else:
-                print(f"✗ Email failed: {response.text}")
+                print(f"✗ Email failed ({response.status_code}): {response.text}")
             return success
         except Exception as e:
             print(f"Brevo error: {e}")
             return False
     
+    # ============================================
+    # SMS METHODS - WITH LOCAL 09 FORMAT
+    # ============================================
+    
     def send_sms(self, phone_number, message):
-        """Send SMS using TextBee API with Device ID"""
+        """Send SMS using TextBee API - converts to local 09 format"""
         if not self.sms_enabled or not phone_number:
             print(f"[SMS SIMULATION] To: {phone_number}, Message: {message}")
             return True
         
         try:
-            phone = phone_number.replace('+63', '').replace('-', '').replace(' ', '')
-            if phone.startswith('0'):
-                phone = phone[1:]
-            if len(phone) == 10:
-                phone = '63' + phone
+            # Convert phone number to local 09 format
+            local_phone = self.format_phone_for_sms(phone_number)
+            
+            print(f"📱 Phone conversion: {phone_number} -> {local_phone}")
+            
+            # CORRECTED: Use the proper TextBee endpoint
+            url = f"{self.textbee_base_url}/gateway/devices/{self.textbee_device_id}/send-sms"
             
             response = requests.post(
-                "https://api.textbee.dev/api/v1/sms/send",
+                url,
                 headers={
-                    "Authorization": f"Bearer {self.textbee_api_key}",
+                    "x-api-key": self.textbee_api_key,
                     "Content-Type": "application/json"
                 },
                 json={
-                    "to": phone,
-                    "deviceId": self.textbee_device_id,
+                    "recipients": [local_phone],
                     "message": message
                 },
                 timeout=30
             )
+            
             success = response.status_code == 200
             if success:
-                print(f"✓ SMS sent to {phone}")
+                print(f"✓ SMS sent to {local_phone}")
+                print(f"   Response: {response.json() if response.text else 'OK'}")
             else:
-                print(f"✗ SMS failed: {response.text}")
+                print(f"✗ SMS failed ({response.status_code}): {response.text}")
             return success
         except Exception as e:
             print(f"TextBee error: {e}")
             return False
     
-    def send_verification_code_email(self, email, otp):
-        """Send OTP via email only"""
+    # ============================================
+    # OTP VERIFICATION (Email + SMS)
+    # ============================================
+    
+    def send_verification_code_email(self, email, otp, name=None):
+        """Send OTP via email with dynamic personalization"""
+        display_name = name or "Valued Customer"
+        
         html = f"""
         <!DOCTYPE html>
         <html>
-        <head><meta charset="UTF-8"></head>
-        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <div style="background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 20px; text-align: center; border-radius: 20px 20px 0 0;">
-                <div style="font-size: 48px;">📧</div>
-                <h1 style="color: white; margin: 0;">{APP_NAME}</h1>
-            </div>
-            <div style="background: white; padding: 30px; border-radius: 0 0 20px 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <h2 style="color: #1a2e1a;">Your Verification Code</h2>
-                <p>Please use the following code to complete your registration:</p>
-                <div style="background: #f5faf5; padding: 20px; text-align: center; border-radius: 12px; margin: 20px 0;">
-                    <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #2d8c3c;">{otp}</span>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Verification Code</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+                .header {{ background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 30px 20px; text-align: center; }}
+                .header h1 {{ color: white; margin: 0; font-size: 28px; }}
+                .content {{ padding: 30px; }}
+                .greeting {{ font-size: 18px; color: #1a2e1a; margin-bottom: 20px; }}
+                .code-box {{ background: #f5faf5; border-radius: 16px; padding: 25px; text-align: center; margin: 20px 0; border: 2px dashed #2d8c3c; }}
+                .code {{ font-size: 42px; font-weight: bold; letter-spacing: 8px; color: #2d8c3c; font-family: monospace; }}
+                .expiry {{ color: #6b8c6b; font-size: 13px; text-align: center; margin-top: 15px; }}
+                .footer {{ background: #f8faf8; padding: 20px; text-align: center; font-size: 12px; color: #8ba88b; }}
+                .warning {{ background: #fff3e0; padding: 12px; border-radius: 12px; font-size: 13px; color: #e65100; margin: 20px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔐 {APP_NAME}</h1>
+                    <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0;">Verification Code</p>
                 </div>
-                <p style="color: #6b8c6b; font-size: 12px;">⏰ This code expires in 10 minutes.</p>
-                <hr style="border: none; border-top: 1px solid #e0e8e0; margin: 20px 0;">
-                <p style="color: #8ba88b; font-size: 11px; text-align: center;">{APP_NAME} - GPS Based Vendor Discovery | Tiaong, Quezon</p>
+                <div class="content">
+                    <div class="greeting">Hello {display_name},</div>
+                    <p>We received a request to verify your {APP_NAME} account. Use the verification code below to complete your registration.</p>
+                    <div class="code-box">
+                        <div class="code">{otp}</div>
+                    </div>
+                    <div class="expiry">⏰ This code expires in <strong>10 minutes</strong></div>
+                    <div class="warning">
+                        ⚠️ If you didn't request this code, please ignore this email or contact support.
+                    </div>
+                </div>
+                <div class="footer">
+                    <p>{APP_NAME} - GPS Based Vendor Discovery App</p>
+                    <p>📍 Tiaong, Quezon | 🍢 Made with love for local food lovers</p>
+                    <p>© 2024 {APP_NAME}. All rights reserved.</p>
+                </div>
             </div>
         </body>
         </html>
         """
         return self.send_email(email, f"🔐 Your {APP_NAME} Verification Code", html)
     
-    def send_verification_code_sms(self, phone, otp):
-        """Send OTP via SMS only"""
-        message = f"🔐 Your {APP_NAME} verification code is: {otp}\n⏰ Valid for 10 minutes.\n\n{APP_NAME} - Find the best street food in Tiaong!"
+    def send_verification_code_sms(self, phone, otp, name=None):
+        """Send OTP via SMS with personalization - uses local 09 format"""
+        display_name = name or "there"
+        message = f"""🔐 {APP_NAME} Verification Code
+
+Hi {display_name}!
+
+Your verification code is: {otp}
+
+⏰ This code expires in 10 minutes.
+
+Never share this code with anyone, even if they claim to be from {APP_NAME}.
+
+{APP_NAME} - Find the best street food in Tiaong, Quezon! 🍢"""
         return self.send_sms(phone, message)
     
-    def send_verification_code(self, email, phone, otp):
+    def send_verification_code(self, email, phone, otp, name=None):
         """Send OTP via both email and SMS"""
         results = {'email': False, 'sms': False}
         
         if email and not email.endswith('@lako.customer') and not email.endswith('@lako.vendor'):
-            results['email'] = self.send_verification_code_email(email, otp)
+            results['email'] = self.send_verification_code_email(email, otp, name)
         
         if phone:
-            results['sms'] = self.send_verification_code_sms(phone, otp)
+            results['sms'] = self.send_verification_code_sms(phone, otp, name)
         
         return results
     
-    def send_welcome_email(self, email, name, role='customer', business_name=None):
-        """Send welcome email based on role"""
+    # ============================================
+    # WELCOME MESSAGES (Dynamic by role)
+    # ============================================
+    
+    def send_welcome_email(self, email, name, role='customer', business_name=None, vendor_name=None):
+        """Send dynamic welcome email based on role"""
         if not email or email.endswith('@lako.customer') or email.endswith('@lako.vendor'):
             return True
         
-        if role == 'customer':
+        if role == 'admin':
+            icon = "👑"
+            title = "Admin Dashboard"
+            display_name = name
+            welcome_message = "You have full access to manage users, vendors, and platform analytics!"
+            cta_text = "Go to Admin Panel"
+            cta_link = f"{BASE_URL}/admin"
+            features = [
+                "📊 View platform statistics",
+                "👥 Manage all users and vendors",
+                "🍽️ Manage vendor products",
+                "⚠️ Suspend/unsuspend accounts",
+                "📈 Monitor platform growth"
+            ]
+            
+        elif role == 'customer':
             icon = "🍢"
             title = "Food Explorer"
             display_name = name
             welcome_message = "Start exploring street food vendors near you in Tiaong, Quezon!"
             cta_text = "Start Exploring"
             cta_link = f"{BASE_URL}/customer"
-        else:
+            features = [
+                "📍 Find street food vendors near you",
+                "📋 Browse menus with photos",
+                "⭐ Save your favorite vendors",
+                "🗺️ Get turn-by-turn directions",
+                "📝 Write reviews and rate vendors",
+                "📱 Share your food experiences"
+            ]
+            
+        else:  # vendor
             icon = "🏪"
             title = "Business Owner"
             display_name = business_name or name
             welcome_message = "Start managing your business and reaching more customers in Tiaong, Quezon!"
             cta_text = "Go to Dashboard"
             cta_link = f"{BASE_URL}/vendor"
+            features = [
+                "📝 Manage your product catalog with photos",
+                "⏰ Set your operating hours",
+                "📊 Track customer traffic and analytics",
+                "⭐ Respond to customer reviews",
+                "📢 Create posts to engage customers",
+                "📍 Update your business location"
+            ]
         
         html = f"""
         <!DOCTYPE html>
         <html>
-        <head><meta charset="UTF-8"></head>
-        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <div style="background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 20px; text-align: center; border-radius: 20px 20px 0 0;">
-                <div style="font-size: 48px;">{icon}</div>
-                <h1 style="color: white; margin: 0;">{APP_NAME}</h1>
-                <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0;">GPS Based Vendor Discovery App</p>
-            </div>
-            <div style="background: white; padding: 30px; border-radius: 0 0 20px 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <h2 style="color: #1a2e1a;">Welcome to {APP_NAME}, {display_name}! 🎉</h2>
-                <p style="color: #4a5e4a; font-size: 16px; line-height: 1.5;">{welcome_message}</p>
-                <div style="background: #f5faf5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                    <p style="margin: 0 0 10px; font-weight: bold; color: #1a2e1a;">What you can do:</p>
-                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">📍 Find street food vendors near you</div>
-                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">📋 Browse menus with photos</div>
-                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">⭐ Save your favorite vendors</div>
-                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;">🗺️ Get turn-by-turn directions</div>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Welcome to {APP_NAME}</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f5faf5; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 28px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.1); }}
+                .header {{ background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 40px 30px; text-align: center; }}
+                .header .icon {{ font-size: 64px; margin-bottom: 10px; }}
+                .header h1 {{ color: white; margin: 0; font-size: 32px; }}
+                .header p {{ color: rgba(255,255,255,0.9); margin: 10px 0 0; }}
+                .content {{ padding: 35px; }}
+                .greeting {{ font-size: 24px; font-weight: 600; color: #1a2e1a; margin-bottom: 15px; }}
+                .message {{ color: #4a5e4a; font-size: 16px; line-height: 1.6; margin-bottom: 25px; }}
+                .features {{ background: #f8faf8; border-radius: 20px; padding: 20px; margin: 25px 0; }}
+                .features h3 {{ color: #1a2e1a; margin-bottom: 15px; font-size: 18px; }}
+                .features ul {{ list-style: none; padding: 0; margin: 0; }}
+                .features li {{ padding: 10px 0; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e8ece8; }}
+                .features li:last-child {{ border-bottom: none; }}
+                .features li::before {{ content: "✓"; background: #2d8c3c; color: white; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }}
+                .cta-button {{ display: inline-block; background: linear-gradient(135deg, #2d8c3c, #1a6b28); color: white; text-decoration: none; padding: 14px 32px; border-radius: 48px; font-weight: 600; margin: 20px 0; text-align: center; }}
+                .footer {{ background: #f8faf8; padding: 20px; text-align: center; font-size: 12px; color: #8ba88b; border-top: 1px solid #e8ece8; }}
+                .social {{ margin-top: 15px; }}
+                .social a {{ color: #2d8c3c; text-decoration: none; margin: 0 10px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div class="icon">{icon}</div>
+                    <h1>Welcome to {APP_NAME}!</h1>
+                    <p>{title}</p>
                 </div>
-                <div style="text-align: center;">
-                    <a href="{cta_link}" style="display: inline-block; background: linear-gradient(135deg, #2d8c3c, #1a6b28); color: white; text-decoration: none; padding: 12px 28px; border-radius: 44px; font-weight: 600; margin: 10px 0;">{cta_text} →</a>
+                <div class="content">
+                    <div class="greeting">Hello, {display_name}! 🎉</div>
+                    <div class="message">{welcome_message}</div>
+                    <div class="features">
+                        <h3>✨ What you can do:</h3>
+                        <ul>
+                            {''.join(f'<li>{feature}</li>' for feature in features)}
+                        </ul>
+                    </div>
+                    <div style="text-align: center;">
+                        <a href="{cta_link}" class="cta-button">{cta_text} →</a>
+                    </div>
+                    <p style="font-size: 13px; color: #6b8c6b; text-align: center; margin-top: 20px;">
+                        Need help? Contact us at <a href="mailto:support@{APP_NAME.lower()}.app" style="color: #2d8c3c;">support@{APP_NAME.lower()}.app</a>
+                    </p>
                 </div>
-                <hr style="border: none; border-top: 1px solid #e0e8e0; margin: 20px 0;">
-                <p style="color: #8ba88b; font-size: 11px; text-align: center;">© 2024 {APP_NAME} | Discover Tiaong's Finest Street Foods</p>
-                <p style="color: #8ba88b; font-size: 11px; text-align: center;">📍 Tiaong, Quezon | 🍢 Made with love for local food lovers</p>
+                <div class="footer">
+                    <p><strong>{APP_NAME}</strong> - GPS Based Vendor Discovery App</p>
+                    <p>📍 Tiaong, Quezon | 🍢 Made with love for local food lovers</p>
+                    <div class="social">
+                        <a href="#">📱 Download App</a> | <a href="#">💬 Support</a> | <a href="#">📧 Contact</a>
+                    </div>
+                    <p style="margin-top: 15px;">© 2024 {APP_NAME}. All rights reserved.</p>
+                </div>
             </div>
         </body>
         </html>
@@ -255,26 +417,246 @@ class NotificationService:
         return self.send_email(email, f"🎉 Welcome to {APP_NAME}, {display_name}!", html)
     
     def send_welcome_sms(self, phone, name, role='customer', business_name=None):
-        """Send welcome SMS based on role"""
+        """Send dynamic welcome SMS based on role - uses local 09 format"""
         if not phone:
             return True
         
-        if role == 'customer':
-            message = f"🎉 Welcome to {APP_NAME}, {name}! 🍢\nStart exploring street food vendors near you in Tiaong!\n📍 Download the app to begin: {BASE_URL}"
-        else:
+        if role == 'admin':
+            message = f"""🎉 Welcome to {APP_NAME} Admin Panel, {name}!
+
+You now have full administrative access to manage users, vendors, and platform analytics.
+
+📊 Admin Dashboard: {BASE_URL}/admin
+
+{APP_NAME} - Platform Administrator"""
+            
+        elif role == 'customer':
+            message = f"""🎉 Welcome to {APP_NAME}, {name}! 🍢
+
+Start exploring street food vendors near you in Tiaong, Quezon!
+
+✨ What you can do:
+• Find vendors near you
+• Browse menus
+• Save favorites
+• Get directions
+
+📍 Download the app: {BASE_URL}/customer
+
+{APP_NAME} - Find the best street food in Tiaong!"""
+            
+        else:  # vendor
             display_name = business_name or name
-            message = f"🎉 Welcome to {APP_NAME}, {display_name}! 🏪\nStart managing your business and reaching more customers in Tiaong!\n📍 Vendor dashboard: {BASE_URL}/vendor"
+            message = f"""🎉 Welcome to {APP_NAME}, {display_name}! 🏪
+
+Your business is now live on {APP_NAME}!
+
+✨ What you can do:
+• Add your menu items with photos
+• Set your operating hours
+• Track customer analytics
+• Create posts to engage customers
+
+📊 Vendor Dashboard: {BASE_URL}/vendor
+
+{APP_NAME} - Grow your food business in Tiaong!"""
         
         return self.send_sms(phone, message)
+    
+    # ============================================
+    # PASSWORD RESET
+    # ============================================
+    
+    def send_password_reset_email(self, email, reset_token, name=None):
+        """Send password reset email"""
+        display_name = name or "User"
+        reset_link = f"{BASE_URL}/reset-password?token={reset_token}"
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Password Reset - {APP_NAME}</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
+                .container {{ max-width: 500px; margin: 0 auto; background: white; border-radius: 20px; overflow: hidden; }}
+                .header {{ background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 30px; text-align: center; }}
+                .header h1 {{ color: white; margin: 0; }}
+                .content {{ padding: 30px; }}
+                .button {{ display: inline-block; background: #2d8c3c; color: white; text-decoration: none; padding: 12px 30px; border-radius: 30px; margin: 20px 0; }}
+                .warning {{ background: #fff3e0; padding: 15px; border-radius: 12px; font-size: 13px; margin-top: 20px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔐 {APP_NAME}</h1>
+                    <p style="color: rgba(255,255,255,0.9);">Password Reset</p>
+                </div>
+                <div class="content">
+                    <p>Hello {display_name},</p>
+                    <p>We received a request to reset your {APP_NAME} account password.</p>
+                    <div style="text-align: center;">
+                        <a href="{reset_link}" class="button">Reset Password</a>
+                    </div>
+                    <p>This link will expire in <strong>1 hour</strong>.</p>
+                    <div class="warning">
+                        ⚠️ If you didn't request a password reset, please ignore this email or contact support.
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(email, f"🔐 Reset Your {APP_NAME} Password", html)
+    
+    def send_password_reset_sms(self, phone, reset_token):
+        """Send password reset SMS with link - uses local 09 format"""
+        reset_link = f"{BASE_URL}/reset-password?token={reset_token}"
+        message = f"""🔐 {APP_NAME} Password Reset
 
+We received a request to reset your password.
+
+Click this link to reset your password:
+{reset_link}
+
+⏰ This link expires in 1 hour.
+
+If you didn't request this, please ignore this message.
+
+{APP_NAME} - Security Notice"""
+        return self.send_sms(phone, message)
+    
+    # ============================================
+    # ORDER/PURCHASE NOTIFICATIONS (For future use)
+    # ============================================
+    
+    def send_order_confirmation_email(self, email, order_details, customer_name):
+        """Send order confirmation email"""
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Order Confirmation - {APP_NAME}</title>
+        </head>
+        <body>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 20px; text-align: center;">
+                    <h1 style="color: white;">✅ Order Confirmed!</h1>
+                </div>
+                <div style="padding: 30px;">
+                    <h2>Hello {customer_name},</h2>
+                    <p>Your order has been confirmed!</p>
+                    <div style="background: #f5faf5; padding: 20px; border-radius: 12px;">
+                        <strong>Order Details:</strong>
+                        <pre style="margin-top: 10px;">{order_details}</pre>
+                    </div>
+                    <p>Thank you for ordering through {APP_NAME}!</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(email, f"✅ Order Confirmed - {APP_NAME}", html)
+    
+    def send_order_notification_sms(self, phone, order_summary, customer_name):
+        """Send order notification SMS to vendor - uses local 09 format"""
+        message = f"""🛒 New Order from {customer_name}!
+
+Order Summary: {order_summary}
+
+Log in to your {APP_NAME} vendor dashboard to manage this order.
+
+{APP_NAME} Vendor Portal: {BASE_URL}/vendor"""
+        return self.send_sms(phone, message)
+    
+    # ============================================
+    # PROMOTIONAL / BULK MESSAGES
+    # ============================================
+    
+    def send_promotional_email(self, email, name, title, message_content, cta_text, cta_link):
+        """Send promotional email to users"""
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>{title} - {APP_NAME}</title>
+        </head>
+        <body>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 30px; text-align: center;">
+                    <h1 style="color: white;">{APP_NAME}</h1>
+                </div>
+                <div style="padding: 30px;">
+                    <h2>Hello {name}!</h2>
+                    <p>{message_content}</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{cta_link}" style="background: #2d8c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px;">{cta_text}</a>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(email, f"📢 {title}", html)
+    
+    def send_promotional_sms(self, phone, name, message_content):
+        """Send promotional SMS to users - uses local 09 format"""
+        message = f"""📢 Hey {name}!
+
+{message_content}
+
+{APP_NAME} - {BASE_URL}"""
+        return self.send_sms(phone, message)
+    
+    # ============================================
+    # ACCOUNT NOTIFICATIONS
+    # ============================================
+    
+    def send_account_suspended_email(self, email, name, reason=None):
+        """Notify user that their account has been suspended"""
+        reason_text = reason or "violation of our terms of service"
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Account Suspended - {APP_NAME}</title>
+        </head>
+        <body>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #e53935; padding: 20px; text-align: center;">
+                    <h1 style="color: white;">⚠️ Account Suspended</h1>
+                </div>
+                <div style="padding: 30px;">
+                    <h2>Hello {name},</h2>
+                    <p>Your {APP_NAME} account has been suspended due to {reason_text}.</p>
+                    <p>If you believe this is a mistake, please contact our support team.</p>
+                    <p>Email: <a href="mailto:support@{APP_NAME.lower()}.app">support@{APP_NAME.lower()}.app</a></p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(email, f"⚠️ Your {APP_NAME} Account Has Been Suspended", html)
+    
+    def send_account_suspended_sms(self, phone, name):
+        """Notify user via SMS about suspension - uses local 09 format"""
+        message = f"""⚠️ {APP_NAME} Account Alert
+
+Hello {name}, your account has been suspended due to a policy violation.
+
+Please contact support for more information: support@{APP_NAME.lower()}.app
+
+{APP_NAME} Team"""
+        return self.send_sms(phone, message)
+
+# Initialize notification service
 notifications = NotificationService()
-
-# ============================================
-# AUTO OTP FUNCTIONS
-# ============================================
-# ============================================
-# SESSION HELPERS (Persistent Login)
-# ============================================
 
 def create_session(user_id, role):
     session_token = str(uuid.uuid4())
@@ -2773,121 +3155,112 @@ checkFirstTime();
 CUSTOMER_DASH = render_page("Customer Dashboard", '''
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#f8faf8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-.app-bar{background:white;padding:16px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
-.app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
-.menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c}
-.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:80px}
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05);z-index:99}
-.nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer;transition:all 0.2s}
+body{background:#f5f8f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.app-bar{background:white;padding:14px 20px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100}
+.back-btn,.menu-btn{background:#eff3ef;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#3a7b4d}
+.app-bar-title{font-size:18px;font-weight:600;color:#2c3e2c;flex:1}
+.content{padding:20px 16px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:90px}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:8px 16px 22px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;z-index:99}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:5px;color:#9aae9a;font-size:11px;cursor:pointer}
 .nav-item i{font-size:22px}
-.nav-item.active{color:#2d8c3c}
+.nav-item.active{color:#3a7b4d}
 .nav-item span{font-size:11px;font-weight:500}
-.card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03);border:0.5px solid rgba(0,0,0,0.03);transition:all 0.2s}
-.card:active{transform:scale(0.98)}
+.card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03);border:1px solid #eef2ee;cursor:pointer}
 .search-bar{background:white;border:1px solid #e0e8e0;border-radius:30px;padding:10px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px}
-.search-bar i{color:#8ba88b;font-size:16px}
 .search-bar input{flex:1;border:none;background:transparent;font-size:15px;outline:none}
-.filter-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px;-webkit-overflow-scrolling:touch}
-.chip{background:#f0f4f0;border:none;border-radius:30px;padding:6px 14px;font-size:13px;white-space:nowrap;cursor:pointer;transition:all 0.2s;color:#4a5e4a}
-.chip.active{background:#2d8c3c;color:white}
+.filter-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px}
+.filter-chips::-webkit-scrollbar{display:none}
+.chip{background:#f0f4f0;border:none;border-radius:30px;padding:6px 14px;font-size:13px;white-space:nowrap;cursor:pointer;color:#4a5e4a}
+.chip.active{background:#3a7b4d;color:white}
 .map-wrapper{position:relative;border-radius:20px;overflow:hidden;margin-bottom:16px}
-.map-container{height:350px;width:100%;position:relative;background:#e8ece8;border-radius:20px}
+.map-container{height:400px;width:100%;background:#e8ece8;border-radius:20px;position:relative}
 #map{height:100%;width:100%;border-radius:20px}
 .map-controls{position:absolute;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:400}
-.map-control-btn{width:44px;height:44px;background:white;border:none;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:pointer;color:#2d8c3c;font-size:18px;transition:all 0.2s;z-index:401}
-.map-control-btn:active{transform:scale(0.95)}
-.btn{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:30px;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.2s}
-.btn:active{transform:scale(0.97)}
-.btn-outline{background:white;border:1px solid #2d8c3c;color:#2d8c3c;padding:10px;border-radius:30px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}
+.map-control-btn{width:44px;height:44px;background:white;border:none;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:pointer;color:#3a7b4d;font-size:18px}
+.map-control-btn.active{background:#3a7b4d;color:white}
+.btn{width:100%;padding:12px;background:#3a7b4d;color:white;border:none;border-radius:30px;font-size:15px;font-weight:600;cursor:pointer}
+.btn-outline{background:white;border:1px solid #3a7b4d;color:#3a7b4d;padding:10px;border-radius:30px;font-size:14px;font-weight:500;cursor:pointer}
 .btn-sm{padding:6px 14px;font-size:13px;width:auto}
 .vendor-status{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600}
-.vendor-status.open{background:#e8f5e9;color:#2d8c3c}
-.vendor-status.closed{background:#ffebee;color:#e53935}
-.stars{color:#ffb800;font-size:12px;letter-spacing:1px}
-.badge{background:#f0f4f0;padding:2px 10px;border-radius:20px;font-size:11px;color:#4a5e4a}
-.text-secondary{color:#8ba88b;font-size:12px}
-.text-center{text-align:center}
-.mt-1{margin-top:4px}
-.mt-2{margin-top:8px}
-.mt-3{margin-top:12px}
-.mb-2{margin-bottom:8px}
+.vendor-status.open{background:#e3f5e3;color:#3a7b4d}
+.vendor-status.closed{background:#ffe8e6;color:#e57373}
+.stars{color:#f5b042;font-size:12px;letter-spacing:1px}
+.text-secondary{color:#8da38d;font-size:12px}
 .flex{display:flex}
 .justify-between{justify-content:space-between}
 .items-center{align-items:center}
 .gap-2{gap:8px}
-.gap-3{gap:12px}
-.avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;object-fit:cover}
-.avatar-lg{width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:36px;margin-bottom:16px;object-fit:cover}
-.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0f4f0}
-.image-thumb img{width:100%;height:100%;object-fit:cover}
+.mt-2{margin-top:8px}
+.mt-3{margin-top:12px}
+.mb-2{margin-bottom:8px}
+.avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3a7b4d,#2e6640);display:flex;align-items:center;justify-content:center;color:white;font-size:20px}
+.avatar-sm{width:32px;height:32px;font-size:14px}
+.avatar-lg{width:80px;height:80px;border-radius:50%;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a7b4d,#2e6640);color:white;font-size:36px}
 .product-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-.product-card{background:white;border-radius:16px;overflow:hidden;border:0.5px solid rgba(0,0,0,0.05);cursor:pointer}
-.product-image{width:100%;aspect-ratio:1;background:#f0f4f0;display:flex;align-items:center;justify-content:center;font-size:32px;color:#8ba88b}
+.product-card{background:white;border-radius:16px;overflow:hidden;cursor:pointer;border:1px solid #eef2ee}
+.product-card:active{transform:scale(0.98)}
+.product-image{width:100%;aspect-ratio:1;background:#f4f7f4;display:flex;align-items:center;justify-content:center}
 .product-image img{width:100%;height:100%;object-fit:cover}
 .product-info{padding:10px}
-.product-name{font-size:13px;font-weight:600;color:#1a2e1a;margin-bottom:4px}
-.product-price{font-size:14px;font-weight:700;color:#2d8c3c}
+.product-name{font-size:13px;font-weight:600}
+.product-price{font-size:14px;font-weight:700;color:#3a7b4d}
 .modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
 .modal.show{display:flex}
-.modal-content{background:white;border-radius:24px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;z-index:1001}
-.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:18px;font-weight:700;color:#1a2e1a}
+.modal-content{background:white;border-radius:24px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:20px}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-weight:700}
 .modal-close{font-size:24px;cursor:pointer;color:#8ba88b;padding:8px}
 .hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
 .hamburger-menu.show{right:0}
-.menu-item{padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px;font-size:14px}
-.menu-item:hover{background:#f0f4f0}
+.close-hamburger{position:absolute;top:20px;right:20px;background:#eff3ef;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#3a7b4d}
+.menu-item{padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px}
+.menu-item:active{background:#eff3ef}
 .menu-divider{height:1px;background:#e8ece8;margin:12px 0}
-.stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px}
-.stat-card{background:#f8faf8;border-radius:16px;padding:12px;text-align:center}
-.stat-value{font-size:24px;font-weight:800;color:#2d8c3c}
-.stat-label{font-size:11px;color:#8ba88b;margin-top:4px}
-.chart-container{background:white;border-radius:16px;padding:12px;margin-bottom:16px}
-.loading{text-align:center;padding:40px;color:#8ba88b}
-.loading i{font-size:32px;margin-bottom:12px;display:block}
-.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:12px;border-radius:30px;text-align:center;z-index:1000;font-size:13px}
+.post-actions{display:flex;gap:16px;margin-top:12px;padding-top:12px;border-top:1px solid #e8ece8}
+.post-action-btn{background:transparent;border:none;padding:8px;border-radius:30px;cursor:pointer;color:#8ba88b;font-size:14px;display:flex;align-items:center;gap:8px}
+.post-action-btn:active{background:#f0f4f0}
+.post-action-btn.liked{color:#e53935}
+.comment-thread{margin-top:12px;padding-left:20px;border-left:2px solid #e0e8e0}
+.comment-item{background:#f8faf8;border-radius:16px;padding:12px;margin-bottom:8px}
+.comment-author{font-weight:600;font-size:13px;cursor:pointer}
+.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#2c3e2c;color:white;padding:12px;border-radius:30px;text-align:center;z-index:1000;font-size:13px;animation:fadeInUp 0.3s}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 .input{width:100%;padding:12px 14px;border:1px solid #e0e8e0;border-radius:14px;font-size:14px;margin-bottom:12px;background:#f8faf8}
-.input:focus{outline:none;border-color:#2d8c3c}
-.tutorial-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px}
-.tutorial-card{background:white;border-radius:28px;max-width:400px;width:100%;padding:24px;animation:slideUp 0.3s ease}
-@keyframes slideUp{from{transform:translateY(50px);opacity:0}to{transform:translateY(0);opacity:1}}
-.tutorial-step{text-align:center}
-.tutorial-step .icon{font-size:56px;margin-bottom:16px}
-.tutorial-step h3{font-size:22px;color:#1a2e1a;margin-bottom:8px}
-.tutorial-step p{color:#6b8c6b;font-size:14px;margin-bottom:16px}
-.tutorial-dots{display:flex;justify-content:center;gap:8px;margin:20px 0}
-.tutorial-dot{width:8px;height:8px;background:#e0e8e0;border-radius:50%;cursor:pointer}
-.tutorial-dot.active{background:#2d8c3c;width:24px;border-radius:12px}
-.minimap-modal .modal-content{padding:0;overflow:hidden}
-.minimap-modal .map-container{height:400px;border-radius:0}
-.minimap-modal .modal-header{padding:16px;margin:0}
-.nav-btn{background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#2d8c3c}
-.profile-edit-avatar{position:relative;display:inline-block;cursor:pointer}
-.profile-edit-overlay{position:absolute;bottom:0;right:0;background:#2d8c3c;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:white;font-size:12px}
-.upload-area{background:#f8faf8;border:1px dashed #c0d0c0;border-radius:16px;padding:16px;text-align:center;cursor:pointer;margin:12px 0}
-.image-preview{width:70px;height:70px;border-radius:8px;overflow:hidden}
-.image-preview img{width:100%;height:100%;object-fit:cover}
-.product-images-container{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.leaflet-control-container .leaflet-top.leaflet-right{z-index:10}
-.leaflet-popup{z-index:20}
-.leaflet-control-attribution{z-index:10}
-.leaflet-control-zoom{z-index:20}
-.leaflet-control-container{position:relative;z-index:1}
+.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0f4f0}
+.image-thumb img{width:100%;height:100%;object-fit:cover}
+.profile-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}
+.stat-card{background:#f8faf8;padding:12px;border-radius:16px;text-align:center;cursor:pointer}
+.stat-card:active{background:#e8ece8}
+.stat-value{font-size:24px;font-weight:800;color:#3a7b4d}
+.stat-label{font-size:11px;color:#8da38d;margin-top:4px}
+.activity-item{background:#f8faf8;border-radius:16px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px}
+.activity-icon{width:40px;height:40px;background:#e3f5e3;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#3a7b4d}
+.delete-btn{color:#e53935;border-color:#e53935}
+.upload-area{background:#fafdfa;border:2px dashed #cde0cd;border-radius:16px;padding:16px;text-align:center;cursor:pointer}
+.price-range{display:flex;gap:12px;margin-bottom:16px}
+.price-range input{flex:1}
+.suggestion-card{background:#f0f7f0;border:1px solid #c8e0c8;margin-bottom:20px}
+.custom-marker{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:white;border:3px solid;box-shadow:0 2px 5px rgba(0,0,0,0.2);font-weight:bold;font-size:18px}
+.user-marker{background:#3a7b4d;border-color:#2e6640;color:white}
+.vendor-marker-open{border-color:#3a7b4d;background:#3a7b4d;color:white}
+.vendor-marker-closed{border-color:#8da38d;background:#8da38d;color:white}
 </style>
 
 <div class="app-bar">
-    <button class="back-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i></button>
+    <button class="back-btn" onclick="confirmLogout()"><i class="fas fa-sign-out-alt"></i></button>
     <div class="app-bar-title">Lako</div>
     <button class="menu-btn" onclick="toggleMenu()"><i class="fas fa-bars"></i></button>
 </div>
 
 <div id="hamburgerMenu" class="hamburger-menu">
-    <div class="menu-item" onclick="showAnalytics()"><i class="fas fa-chart-line"></i> My Activity</div>
-    <div class="menu-item" onclick="showTutorial()"><i class="fas fa-question-circle"></i> Tutorial</div>
+    <button class="close-hamburger" onclick="closeMenu()"><i class="fas fa-times"></i></button>
+    <div class="menu-item" onclick="closeMenu(); showSavedVendors()"><i class="fas fa-bookmark"></i> Saved Vendors (<span id="savedCount">0</span>)</div>
+    <div class="menu-item" onclick="closeMenu(); showFollowedVendors()"><i class="fas fa-bell"></i> Following (<span id="followedCount">0</span>)</div>
     <div class="menu-divider"></div>
-    <div class="menu-item" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
+    <div class="menu-item" onclick="closeMenu(); showPreferences()"><i class="fas fa-sliders-h"></i> Preferences</div>
+    <div class="menu-item" onclick="closeMenu(); showAnalytics()"><i class="fas fa-chart-line"></i> My Activity</div>
+    <div class="menu-divider"></div>
+    <div class="menu-item" onclick="confirmLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
 </div>
 
 <div class="bottom-nav">
@@ -2900,97 +3273,42 @@ body{background:#f8faf8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 
 <div class="content" id="content"></div>
 
-<!-- Vendor Modal -->
-<div class="modal" id="vendorModal" onclick="if(event.target===this)closeModal()">
-    <div class="modal-content">
-        <div class="modal-header"><h3 id="modalTitle"></h3><span class="modal-close" onclick="closeModal()">&times;</span></div>
-        <div id="modalBody"></div>
-    </div>
-</div>
-
-<!-- Minimap Modal -->
-<div class="modal minimap-modal" id="minimapModal" onclick="if(event.target===this)closeMinimap()">
-    <div class="modal-content">
-        <div class="modal-header"><h3><i class="fas fa-directions"></i> Navigation</h3><span class="modal-close" onclick="closeMinimap()">&times;</span></div>
-        <div class="map-container" id="minimapContainer" style="height:400px"></div>
-        <div class="flex justify-between items-center gap-2 p-3">
-            <button class="btn-outline btn-sm" onclick="centerMinimapOnUser()"><i class="fas fa-location-dot"></i> My Location</button>
-            <button class="btn btn-sm" onclick="openExternalMaps()"><i class="fas fa-external-link-alt"></i> Open Maps</button>
-        </div>
-    </div>
-</div>
-
-<!-- Post Modal -->
-<div class="modal" id="postModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Share Your Experience</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div>
-        <textarea id="postContent" class="input" placeholder="What's your favorite food today?" rows="4"></textarea>
-        <div class="upload-area" onclick="document.getElementById('postImages').click()">
-            <i class="fas fa-camera" style="font-size:24px;color:#2d8c3c"></i>
-            <div style="font-size:12px;margin-top:4px">Add Photos</div>
-        </div>
-        <input type="file" id="postImages" multiple accept="image/*" style="display:none" onchange="previewPostImages(this)">
-        <div id="postImagePreview" class="product-images-container"></div>
-        <button class="btn mt-2" onclick="createPost()"><i class="fas fa-paper-plane"></i> Post</button>
-    </div>
-</div>
-
-<!-- Profile Modal -->
-<div class="modal" id="profileModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Edit Profile</h3><span class="modal-close" onclick="closeProfileModal()">&times;</span></div>
-        <div class="text-center mb-3">
-            <div class="profile-edit-avatar" style="display:inline-block" onclick="document.getElementById('profilePhotoInput').click()">
-                <img id="profileAvatarPreview" src="" class="avatar-lg" style="object-fit:cover;width:80px;height:80px;border-radius:50%">
-                <div class="profile-edit-overlay"><i class="fas fa-camera"></i></div>
-            </div>
-            <input type="file" id="profilePhotoInput" accept="image/*" style="display:none" onchange="updateProfilePhoto(this)">
-        </div>
-        <input type="text" id="profileName" class="input" placeholder="Your name">
-        <input type="tel" id="profilePhone" class="input" placeholder="Phone number">
-        <button class="btn" onclick="saveProfile()"><i class="fas fa-save"></i> Save Changes</button>
-    </div>
-</div>
-
-<!-- Product View Modal -->
-<div class="modal" id="productViewModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3 id="productViewTitle"></h3><span class="modal-close" onclick="closeProductViewModal()">&times;</span></div>
-        <div id="productViewBody"></div>
-        <button class="btn mt-3" onclick="goToVendorFromProduct()"><i class="fas fa-store"></i> Visit Vendor Page</button>
-    </div>
-</div>
-
-<!-- Analytics Modal -->
-<div class="modal" id="analyticsModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Your Activity</h3><span class="modal-close" onclick="closeAnalyticsModal()">&times;</span></div>
-        <div id="analyticsContent"></div>
-    </div>
-</div>
-
-<!-- Tutorial Modal -->
-<div id="tutorialModal" class="tutorial-overlay" style="display:none">
-    <div class="tutorial-card">
-        <div id="tutorialContent"></div>
-    </div>
-</div>
+<div id="vendorModal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="modalTitle"></h3><span class="modal-close" onclick="closeModal()">&times;</span></div><div id="modalBody"></div></div></div>
+<div id="postModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Create Post</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div><textarea id="postContent" class="input" rows="4" placeholder="Share your food experience..."></textarea><div class="upload-area" onclick="document.getElementById('postImages').click()"><i class="fas fa-camera"></i> Add Photos</div><input type="file" id="postImages" multiple accept="image/*" style="display:none" onchange="previewPostImages(this)"><div id="postImagePreview" class="image-grid" style="margin-top:8px"></div><button class="btn mt-2" onclick="createPost()">Post</button></div></div>
+<div id="replyModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Write Reply</h3><span class="modal-close" onclick="closeReplyModal()">&times;</span></div><textarea id="replyContent" class="input" rows="3" placeholder="Write your reply..."></textarea><input type="hidden" id="replyPostId"><button class="btn" onclick="submitReply()">Post Reply</button></div></div>
+<div id="reviewModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Write Review</h3><span class="modal-close" onclick="closeReviewModal()">&times;</span></div><div id="reviewStars" style="display:flex;gap:8px;justify-content:center;margin:12px 0"><i class="fas fa-star review-star" data-rating="1" style="font-size:32px;cursor:pointer;color:#ddd"></i><i class="fas fa-star review-star" data-rating="2" style="font-size:32px;cursor:pointer;color:#ddd"></i><i class="fas fa-star review-star" data-rating="3" style="font-size:32px;cursor:pointer;color:#ddd"></i><i class="fas fa-star review-star" data-rating="4" style="font-size:32px;cursor:pointer;color:#ddd"></i><i class="fas fa-star review-star" data-rating="5" style="font-size:32px;cursor:pointer;color:#ddd"></i></div><textarea id="reviewComment" class="input" rows="4" placeholder="Share your experience..."></textarea><input type="hidden" id="reviewVendorId"><button class="btn" onclick="submitReview()">Submit Review</button></div></div>
+<div id="preferencesModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Your Preferences</h3><span class="modal-close" onclick="closePreferencesModal()">&times;</span></div><div><strong>Food Categories</strong></div><div id="prefCategories" class="filter-chips" style="flex-wrap:wrap"></div><div class="mt-3"><strong>Budget Range (₱)</strong></div><div class="price-range"><input type="range" id="prefPriceMin" min="0" max="1000" step="50" style="flex:1"><input type="range" id="prefPriceMax" min="0" max="1000" step="50" style="flex:1"></div><div class="flex justify-between"><span>₱<span id="prefPriceMinVal">0</span></span><span>₱<span id="prefPriceMaxVal">500</span></span></div><div class="mt-3"><strong>Max Distance (meters)</strong></div><input type="range" id="prefDistance" min="5" max="200" step="5" value="50" style="width:100%"><div class="flex justify-between"><span>5m</span><span id="prefDistanceVal">50m</span><span>200m</span></div><button class="btn mt-4" onclick="savePreferences()">Save Preferences</button></div></div>
+<div id="profileModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Edit Profile</h3><span class="modal-close" onclick="closeProfileModal()">&times;</span></div><input id="profileName" class="input" placeholder="Full Name"><input id="profilePhone" class="input" placeholder="Phone Number"><button class="btn" onclick="saveProfile()">Save Changes</button></div></div>
+<div id="userProfileModal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="userProfileTitle"></h3><span class="modal-close" onclick="closeUserProfileModal()">&times;</span></div><div id="userProfileBody"></div></div></div>
+<div id="analyticsModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Your Activity</h3><span class="modal-close" onclick="closeAnalyticsModal()">&times;</span></div><div id="analyticsContent"></div></div></div>
+<div id="minimapModal" class="modal"><div class="modal-content" style="padding:0"><div class="modal-header" style="padding:16px"><h3><i class="fas fa-directions"></i> Navigation</h3><span class="modal-close" onclick="closeMinimap()">&times;</span></div><div id="minimapContainer" style="height:400px;width:100%"></div><div class="flex gap-2 p-3"><button class="btn-outline btn-sm" onclick="centerMinimap()"><i class="fas fa-location-dot"></i> My Location</button><button class="btn btn-sm" onclick="openGoogleMaps()"><i class="fab fa-google"></i> Google Maps</button></div></div></div>
 
 <script>
 let sessionToken = localStorage.getItem('session_token');
-let userLocation = null, allVendors = [], allProducts = [], savedVendors = [], followedVendors = [], followedUsers = [];
-let page = 'map', map = null, minimap = null, minimapRouting = null;
-let heatLayer = null, fenceLayer = null, markerCluster = null;
-let heatActive = false, fenceActive = false;
-let userPreferences = {categories: [], priceMin: 0, priceMax: 500, maxDistance: 10};
-let currentVendorForProduct = null;
+let userLocation = null, watchId = null;
+let allVendors = [], allProducts = [], savedVendors = [], followedVendors = [], vendorPosts = {};
+let currentUserId = null, allPosts = [], userProfile = null;
+let page = 'map', map = null, markerCluster = null, heatLayer = null, userMarker = null, minimap = null;
+let heatActive = true;
+let userPreferences = {categories: [], priceMin: 0, priceMax: 500, maxDistance: 50};
+let currentRating = 0, currentReviewVendorId = null;
+let activityLog = {lastViewedVendor: null, lastViewedProduct: null};
 
-// Check session immediately
-if (!sessionToken) {
-    window.location.href = '/auth';
+if (!sessionToken) window.location.href = '/auth';
+
+if (navigator.geolocation) {
+    watchId = navigator.geolocation.watchPosition(function(pos) {
+        let newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        if (!userLocation) {
+            userLocation = newLoc;
+            loadData();
+        } else {
+            userLocation = newLoc;
+            if (map && userMarker) userMarker.setLatLng([userLocation.lat, userLocation.lng]);
+            if (page === 'map') updateNearbyList();
+        }
+    }, null, { enableHighAccuracy: true });
 }
-
-const CATEGORIES = ["Coffee","Pancit","Tusok Tusok","Contemporary Street food","Bread and Pastry","Lomi","Beverage","Sarisari Store","Karendirya","Traditional Desserts","Contemporary Desserts","Squidball","Siomai","Siopao","Taho","Balut and other poultry","Corn","Fruit shakes","Fruit Juice"];
 
 function showToast(msg){
     let t=document.querySelector('.toast');
@@ -3002,711 +3320,761 @@ function showToast(msg){
     setTimeout(()=>t.remove(),3000);
 }
 
-async function api(url, options = {}) {
-    if (!sessionToken && !url.includes('/auth/')) {
-        console.log('No session token, redirecting');
-        window.location.href = '/auth';
-        return null;
-    }
-    
-    const headers = {
-        'Content-Type': 'application/json',
-        ...options.headers
-    };
-    
-    if (sessionToken) {
-        headers['X-Session-Token'] = sessionToken;
-    }
-    
-    try {
-        const res = await fetch(url, {
-            ...options,
-            headers: headers
-        });
-        
-        if (res.status === 401) {
-            console.log('401 Unauthorized, clearing session');
-            localStorage.clear();
-            window.location.href = '/auth';
-            return null;
-        }
-        
-        return res.json();
-    } catch (e) {
-        console.error('API error:', e);
-        return null;
-    }
-}
-
-async function loadData() {
-    if (!sessionToken) return;
-    
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(p => {
-            userLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
-            loadVendorsAndProducts();
-        }, () => {
-            userLocation = { lat: 14.5995, lng: 120.9842 };
-            loadVendorsAndProducts();
-        });
-    } else {
-        userLocation = { lat: 14.5995, lng: 120.9842 };
-        loadVendorsAndProducts();
-    }
-    loadSaved();
-    loadFollows();
-    loadUserPreferences();
-}
-
-async function loadVendorsAndProducts() {
-    const data = await api(`/api/customer/map/vendors?lat=${userLocation.lat}&lng=${userLocation.lng}`);
-    if (data && data.vendors) {
-        allVendors = data.vendors;
-        allProducts = [];
-        for (let vendor of allVendors) {
-            const productsRes = await api(`/api/customer/products/${vendor.id}`);
-            const products = productsRes?.products || [];
-            for (let product of products) {
-                product.vendor = vendor;
-                allProducts.push(product);
-            }
-        }
-        if (page === 'map') showMap();
-        else if (page === 'vendors') showVendors();
-        else if (page === 'products') showProducts();
-    }
-}
-
-async function loadSaved() {
-    const data = await api('/api/customer/shortlist');
-    if (data) { savedVendors = data.vendors || []; }
-}
-
-async function loadFollows() {
-    const data = await api('/api/customer/follows');
-    if (data) { followedVendors = data.vendors || []; followedUsers = data.users || []; }
-}
-
-async function loadUserPreferences() {
-    const data = await api('/api/customer/preferences');
-    if (data) { userPreferences = data; }
-}
-
-async function updateLocation() {
-    if (navigator.geolocation && userLocation) {
-        navigator.geolocation.getCurrentPosition(async p => {
-            userLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
-            await api('/api/customer/update-location', { method: 'POST', body: JSON.stringify(userLocation) });
-        });
-    }
-}
-setInterval(updateLocation, 30000);
-updateLocation();
-
-function showPage(p) {
-    page = p;
-    document.querySelectorAll('.nav-item').forEach((el, i) => {
-        const pages = ['map', 'vendors', 'products', 'feed', 'profile'];
-        el.classList.toggle('active', pages[i] === p);
-    });
-    if (p === 'map') showMap();
-    else if (p === 'vendors') showVendors();
-    else if (p === 'products') showProducts();
-    else if (p === 'feed') showFeed();
-    else if (p === 'profile') showProfile();
-}
-
-function showMap() {
-    document.getElementById('content').innerHTML = `
-        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="searchBox" placeholder="Search vendors..." oninput="filterMarkers()"></div>
-        <div class="map-wrapper"><div class="map-container"><div id="map"></div><div class="map-controls"><button class="map-control-btn" onclick="centerOnUser()"><i class="fas fa-location-dot"></i></button><button class="map-control-btn" id="heatBtn" onclick="toggleHeatmap()"><i class="fas fa-fire"></i></button><button class="map-control-btn" id="fenceBtn" onclick="toggleGeofence()"><i class="fas fa-circle"></i></button><button class="map-control-btn" id="clusterBtn" onclick="toggleCluster()"><i class="fas fa-layer-group"></i></button></div></div></div>
-        <div class="flex justify-between items-center mb-2"><h4><i class="fas fa-store"></i> Nearby</h4><span class="text-secondary">${allVendors.length} found</span></div>
-        <div id="nearbyList"></div>`;
-    
-    setTimeout(() => {
-        if (map) map.remove();
-        map = L.map('map').setView([userLocation.lat, userLocation.lng], 14);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-        }).addTo(map);
-        
-        markerCluster = L.markerClusterGroup();
-        allVendors.forEach(v => {
-            if (v.latitude && v.longitude) {
-                const marker = L.marker([v.latitude, v.longitude])
-                    .bindPopup(`<b>${v.business_name}</b><br>${v.category}<br><i class="fas fa-star" style="color:#ffb800"></i> ${v.rating || 'New'}`)
-                    .on('click', () => showVendorModal(v.id));
-                markerCluster.addLayer(marker);
-            }
-        });
-        map.addLayer(markerCluster);
-        updateNearbyList();
-    }, 100);
-}
-
-function filterMarkers() {
-    const query = document.getElementById('searchBox')?.value.toLowerCase() || '';
-    if (markerCluster) map.removeLayer(markerCluster);
-    markerCluster = L.markerClusterGroup();
-    allVendors.forEach(v => {
-        if (v.latitude && v.longitude && (v.business_name.toLowerCase().includes(query) || v.category.toLowerCase().includes(query))) {
-            const marker = L.marker([v.latitude, v.longitude]).bindPopup(`<b>${v.business_name}</b>`).on('click', () => showVendorModal(v.id));
-            markerCluster.addLayer(marker);
-        }
-    });
-    map.addLayer(markerCluster);
-}
-
-function updateNearbyList() {
-    const list = document.getElementById('nearbyList');
-    if (list) {
-        const sorted = [...allVendors].sort((a,b) => (a.distance || 999) - (b.distance || 999));
-        list.innerHTML = sorted.slice(0,10).map(v => `
-            <div class="card" onclick="showVendorModal('${v.id}')">
-                <div class="flex justify-between items-center">
-                    <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span></div>
-                    <div><div class="stars">${'★'.repeat(Math.floor(v.rating || 0))}</div><div class="text-secondary">${v.distance ? v.distance + 'km' : ''}</div></div>
-                </div>
-            </div>
-        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors nearby</div>';
-    }
-}
-
-function showVendors() {
-    document.getElementById('content').innerHTML = `
-        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="vendorSearch" placeholder="Search vendors..." oninput="filterVendorList()"></div>
-        <div class="filter-chips" id="categoryFilters">${CATEGORIES.slice(0,8).map(c => `<div class="chip" onclick="filterByCategory('${c}')">${c}</div>`).join('')}<div class="chip" onclick="filterByCategory('all')">All</div></div>
-        <div id="vendorList"></div>`;
-    filterVendorList();
-}
-
-let activeCategory = 'all';
-
-function filterByCategory(cat) {
-    activeCategory = cat;
-    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-    if (cat !== 'all') event.target.classList.add('active');
-    filterVendorList();
-}
-
-function filterVendorList() {
-    const query = document.getElementById('vendorSearch')?.value.toLowerCase() || '';
-    let filtered = allVendors.filter(v => v.business_name.toLowerCase().includes(query) || v.category.toLowerCase().includes(query));
-    if (activeCategory !== 'all') filtered = filtered.filter(v => v.category === activeCategory);
-    document.getElementById('vendorList').innerHTML = filtered.map(v => `
-        <div class="card" onclick="showVendorModal('${v.id}')">
-            <div class="flex justify-between items-center">
-                <div><strong><i class="fas fa-store"></i> ${v.business_name}</strong><br><span class="text-secondary"><i class="fas fa-tag"></i> ${v.category}</span><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating || 0))}</div></div>
-                <span class="vendor-status ${v.is_open ? 'open' : 'closed'}">${v.is_open ? 'Open' : 'Closed'}</span>
-            </div>
-        </div>
-    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No vendors found</div>';
-}
-
-function showProducts() {
-    document.getElementById('content').innerHTML = `
-        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="productSearch" placeholder="Search products..." oninput="filterProductList()"></div>
-        <div class="filter-chips" id="productCategoryFilters">${CATEGORIES.slice(0,8).map(c => `<div class="chip" onclick="filterProductByCategory('${c}')">${c}</div>`).join('')}<div class="chip" onclick="filterProductByCategory('all')">All</div></div>
-        <div id="productList" class="product-grid"></div>`;
-    filterProductList();
-}
-
-let activeProductCategory = 'all';
-
-function filterProductByCategory(cat) {
-    activeProductCategory = cat;
-    document.querySelectorAll('#productCategoryFilters .chip').forEach(c => c.classList.remove('active'));
-    if (cat !== 'all') event.target.classList.add('active');
-    filterProductList();
-}
-
-function filterProductList() {
-    const query = document.getElementById('productSearch')?.value.toLowerCase() || '';
-    let filtered = allProducts.filter(p => p.name.toLowerCase().includes(query) || (p.category && p.category.toLowerCase().includes(query)));
-    if (activeProductCategory !== 'all') filtered = filtered.filter(p => p.category === activeProductCategory);
-    if (userPreferences.categories.length > 0 && activeProductCategory === 'all') {
-        filtered = filtered.filter(p => userPreferences.categories.includes(p.category));
-    }
-    filtered = filtered.filter(p => p.price >= userPreferences.priceMin && p.price <= userPreferences.priceMax);
-    document.getElementById('productList').innerHTML = filtered.map(p => `
-        <div class="product-card" onclick="showProductModal('${p.id}', '${p.vendor.id}')">
-            <div class="product-image">${p.images && p.images[0] ? `<img src="${p.images[0].thumbnail}">` : '<i class="fas fa-utensils"></i>'}</div>
-            <div class="product-info">
-                <div class="product-name">${p.name}</div>
-                <div class="product-price">₱${p.price}</div>
-                <div class="text-secondary" style="font-size:10px">${p.vendor?.business_name || ''}</div>
-            </div>
-        </div>
-    `).join('') || '<div class="card text-center text-secondary col-span-2"><i class="fas fa-info-circle"></i> No products found</div>';
-}
-
-async function showProductModal(productId, vendorId) {
-    const product = allProducts.find(p => p.id === productId);
-    if (!product) return;
-    currentVendorForProduct = product.vendor;
-    document.getElementById('productViewTitle').innerHTML = `<i class="fas fa-utensils"></i> ${product.name}`;
-    document.getElementById('productViewBody').innerHTML = `
-        <div class="text-center mb-3">${product.images && product.images[0] ? `<img src="${product.images[0].original}" style="width:100%;border-radius:16px;max-height:250px;object-fit:cover">` : '<div style="width:100%;height:150px;background:#f0f4f0;border-radius:16px;display:flex;align-items:center;justify-content:center"><i class="fas fa-utensils" style="font-size:48px;color:#8ba88b"></i></div>'}</div>
-        <div class="product-price text-center mb-2">₱${product.price}</div>
-        <p class="text-secondary">${product.description || 'No description available'}</p>
-        <div class="mt-3"><strong>Sold by:</strong> ${product.vendor?.business_name}</div>
-        <div class="stars mt-1">${'★'.repeat(Math.floor(product.vendor?.rating || 0))}</div>
-    `;
-    document.getElementById('productViewModal').classList.add('show');
-}
-
-function goToVendorFromProduct() {
-    if (currentVendorForProduct) {
-        closeProductViewModal();
-        showVendorModal(currentVendorForProduct.id);
-    }
-}
-
-async function showFeed() {
-    const data = await api('/api/customer/feed');
-    let posts = data?.posts || [];
-    document.getElementById('content').innerHTML = `
-        <button class="btn" onclick="openPostModal()"><i class="fas fa-plus"></i> Share Your Experience</button>
-        <div id="feedList" class="mt-3"></div>`;
-    document.getElementById('feedList').innerHTML = posts.slice(0,30).map(p => `
-        <div class="card">
-            <div class="flex items-center gap-3">
-                <div class="avatar" style="background:#f0f4f0;color:#2d8c3c"><i class="fas fa-user-circle"></i></div>
-                <div><strong>${p.author || 'User'}</strong><br><span class="text-secondary"><i class="far fa-clock"></i> ${timeAgo(p.created_at)}</span></div>
-                <div class="flex-1"></div>
-                <button class="nav-btn" onclick="followUser('${p.user_id}')"><i class="fas fa-user-plus"></i></button>
-            </div>
-            <p class="mt-2">${p.content}</p>
-            ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail}"></div>`).join('')}</div>` : ''}
-            <div class="flex gap-3 mt-3">
-                <button class="btn-outline btn-sm" onclick="likePost('${p.id}')"><i class="far fa-heart"></i> ${p.likes || 0}</button>
-                <button class="btn-outline btn-sm" onclick="commentOnPost('${p.id}')"><i class="far fa-comment"></i> ${p.comment_count || 0}</button>
-            </div>
-        </div>
-    `).join('');
+function escapeHtml(text) {
+    if (!text) return '';
+    let div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function timeAgo(date) {
-    const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+    let seconds = Math.floor((new Date() - new Date(date)) / 1000);
     if (seconds < 60) return seconds + 's ago';
-    const minutes = Math.floor(seconds / 60);
+    let minutes = Math.floor(seconds / 60);
     if (minutes < 60) return minutes + 'm ago';
-    const hours = Math.floor(minutes / 60);
+    let hours = Math.floor(minutes / 60);
     if (hours < 24) return hours + 'h ago';
     return Math.floor(hours / 24) + 'd ago';
 }
 
-async function likePost(postId) { await api('/api/customer/like', { method: 'POST', body: JSON.stringify({ post_id: postId }) }); showFeed(); }
-async function commentOnPost(postId) { let comment = prompt('Write a comment:'); if(comment) await api('/api/customer/comment', { method: 'POST', body: JSON.stringify({ post_id: postId, comment }) }); showFeed(); }
-async function followUser(userId) { await api('/api/customer/follow', { method: 'POST', body: JSON.stringify({ user_id: userId }) }); showToast('Followed!'); showFeed(); }
-
-async function showProfile() {
-    const profile = await api('/api/customer/profile');
-    document.getElementById('content').innerHTML = `
-        <div class="card text-center">
-            <div class="profile-edit-avatar" style="display:inline-block;cursor:pointer" onclick="openProfileModal()">
-                ${profile?.profile_photo ? `<img src="${profile.profile_photo}" class="avatar-lg" style="object-fit:cover;width:80px;height:80px;border-radius:50%">` : `<div class="avatar-lg" style="margin:0 auto"><i class="fas fa-user-circle"></i></div>`}
-                <div class="profile-edit-overlay"><i class="fas fa-camera"></i></div>
-            </div>
-            <h3 id="profileNameDisplay" class="mt-2">${profile?.full_name || 'Food Explorer'}</h3>
-            <p class="text-secondary"><i class="fas fa-phone"></i> ${profile?.phone || 'No phone'}</p>
-            <p class="text-secondary"><i class="fas fa-envelope"></i> ${profile?.email || ''}</p>
-            <div class="stats-grid mt-3">
-                <div class="stat-card"><div class="stat-value">${savedVendors.length}</div><div class="stat-label">Saved</div></div>
-                <div class="stat-card"><div class="stat-value">${followedVendors.length}</div><div class="stat-label">Following</div></div>
-            </div>
-            <button class="btn-outline mt-3" onclick="openProfileModal()"><i class="fas fa-edit"></i> Edit Profile</button>
-            <button class="btn-outline mt-2" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</button>
-        </div>`;
+async function api(url, options = {}) {
+    if (!sessionToken && !url.includes('/auth/')) { window.location.href = '/auth'; return null; }
+    const headers = {'Content-Type': 'application/json'};
+    if (sessionToken) headers['X-Session-Token'] = sessionToken;
+    try {
+        const res = await fetch(url, {...options, headers});
+        if (res.status === 401) { localStorage.clear(); window.location.href = '/auth'; return null; }
+        return res.json();
+    } catch (e) { console.error('API error:', e); return null; }
 }
 
-async function openProfileModal() {
-    const profile = await api('/api/customer/profile');
-    document.getElementById('profileName').value = profile?.full_name || '';
-    document.getElementById('profilePhone').value = profile?.phone || '';
-    if (profile?.profile_photo) {
-        document.getElementById('profileAvatarPreview').src = profile.profile_photo;
+async function loadData() {
+    await loadVendorsAndProducts();
+    await loadSaved();
+    await loadFollows();
+    await loadUserPreferences();
+    await loadProfile();
+    await loadFeed();
+}
+
+async function loadProfile() {
+    const data = await api('/api/customer/profile');
+    if (data) { currentUserId = data.id; userProfile = data; }
+}
+
+async function loadFeed() {
+    const data = await api('/api/customer/feed');
+    if (data && data.posts) allPosts = data.posts;
+}
+
+async function loadVendorPosts(vendorId) {
+    if (vendorPosts[vendorId]) return vendorPosts[vendorId];
+    const data = await api(`/api/customer/vendor/posts/${vendorId}`);
+    if (data && data.posts) {
+        vendorPosts[vendorId] = data.posts;
+        return data.posts;
     }
-    document.getElementById('profileModal').classList.add('show');
+    return [];
 }
 
-async function updateProfilePhoto(input) {
-    if (input.files && input.files[0]) {
-        const file = input.files[0];
-        if (file.size > 5 * 1024 * 1024) { showToast('File too large. Max 5MB'); return; }
-        const reader = new FileReader();
-        reader.onload = async function(e) {
-            const res = await api('/api/customer/update-profile-photo', { method: 'POST', body: JSON.stringify({ photo: e.target.result }) });
-            if (res && res.success) {
-                showToast('Profile photo updated!');
-                showProfile();
-                closeProfileModal();
+async function loadVendorsAndProducts() {
+    const vendorsData = await api(`/api/customer/map/vendors?lat=${userLocation?.lat || 14.5995}&lng=${userLocation?.lng || 120.9842}`);
+    
+    if (vendorsData && vendorsData.vendors) {
+        allVendors = vendorsData.vendors;
+        allProducts = [];
+        
+        for (let vendor of allVendors) {
+            const productsRes = await api(`/api/customer/products/${vendor.id}`);
+            if (productsRes?.products) {
+                for (let product of productsRes.products) { 
+                    product.vendor = vendor; 
+                    allProducts.push(product); 
+                }
             }
-        };
-        reader.readAsDataURL(file);
+        }
+        
+        if (page === 'map') showMap();
+        else if (page === 'vendors') showVendors();
+        else if (page === 'products') showProducts();
+        else if (page === 'feed') showFeed();
+        else showProfile();
     }
 }
 
-async function saveProfile() {
-    const name = document.getElementById('profileName').value;
-    const phone = document.getElementById('profilePhone').value;
-    const res = await api('/api/customer/update-profile', { method: 'POST', body: JSON.stringify({ full_name: name, phone: phone }) });
-    if (res && res.success) {
-        showToast('Profile updated!');
-        closeProfileModal();
-        showProfile();
-    }
+async function loadSaved() { 
+    const data = await api('/api/customer/shortlist'); 
+    if (data) { 
+        savedVendors = data.vendors || []; 
+        let el = document.getElementById('savedCount');
+        if (el) el.innerText = savedVendors.length;
+    } 
 }
 
-async function showAnalytics() {
-    const data = await api('/api/customer/analytics');
-    document.getElementById('analyticsContent').innerHTML = `
-        <div class="stats-grid">
-            <div class="stat-card"><div class="stat-value">${data?.total_visits || 0}</div><div class="stat-label">Vendors Visited</div></div>
-            <div class="stat-card"><div class="stat-value">${data?.reviews_written || 0}</div><div class="stat-label">Reviews</div></div>
-            <div class="stat-card"><div class="stat-value">${data?.posts_created || 0}</div><div class="stat-label">Posts</div></div>
-            <div class="stat-card"><div class="stat-value">${data?.likes_given || 0}</div><div class="stat-label">Likes</div></div>
-        </div>
-        <div class="chart-container"><canvas id="activityChart"></canvas></div>`;
-    document.getElementById('analyticsModal').classList.add('show');
+async function loadFollows() { 
+    const data = await api('/api/customer/follows'); 
+    if (data) { 
+        followedVendors = data.vendors || []; 
+        let el = document.getElementById('followedCount');
+        if (el) el.innerText = followedVendors.length;
+    } 
+}
+
+async function loadUserPreferences() { 
+    const data = await api('/api/customer/preferences'); 
+    if (data) { 
+        userPreferences = data; 
+        if (!userPreferences.maxDistance) userPreferences.maxDistance = 50;
+        if (!userPreferences.priceMin) userPreferences.priceMin = 0;
+        if (!userPreferences.priceMax) userPreferences.priceMax = 500;
+    } 
+}
+
+function showPage(p) {
+    page = p;
+    let pages = ['map','vendors','products','feed','profile'];
+    document.querySelectorAll('.nav-item').forEach((el,i)=> el.classList.toggle('active', pages[i]===p));
+    closeMenu();
+    if(p==='map') showMap();
+    else if(p==='vendors') showVendors();
+    else if(p==='products') showProducts();
+    else if(p==='feed') showFeed();
+    else showProfile();
+}
+
+function showMap() {
+    document.getElementById('content').innerHTML = `
+        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="searchBox" placeholder="Search vendors..." oninput="filterMapMarkers()"></div>
+        <div class="map-wrapper"><div class="map-container"><div id="map"></div><div class="map-controls"><button class="map-control-btn" onclick="centerOnUser()"><i class="fas fa-location-dot"></i></button><button class="map-control-btn ${heatActive ? 'active' : ''}" id="heatBtn" onclick="toggleHeatmap()"><i class="fas fa-fire"></i></button></div></div></div>
+        <div id="nearbyList"></div>`;
+    
     setTimeout(() => {
-        new Chart(document.getElementById('activityChart'), {
-            type: 'bar',
-            data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [{ label: 'Activity', data: data?.weekly_activity || [5, 8, 12, 15, 20, 25, 18], backgroundColor: '#2d8c3c', borderRadius: 6 }] },
-            options: { responsive: true, maintainAspectRatio: true }
+        if (map) map.remove();
+        let centerLat = (userLocation && userLocation.lat) ? userLocation.lat : 14.5995;
+        let centerLng = (userLocation && userLocation.lng) ? userLocation.lng : 120.9842;
+        map = L.map('map', { zoomControl: false }).setView([centerLat, centerLng], 15);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+        }).addTo(map);
+        
+        if (userLocation && userLocation.lat) {
+            let userIcon = L.divIcon({
+                html: `<div class="custom-marker user-marker"><i class="fas fa-user"></i></div>`,
+                iconSize: [44, 44],
+                className: ''
+            });
+            userMarker = L.marker([userLocation.lat, userLocation.lng], { icon: userIcon }).addTo(map).bindPopup('<b>You are here</b>');
+        }
+        
+        markerCluster = L.markerClusterGroup({ spiderfyOnMaxZoom: true, maxClusterRadius: 50 });
+        
+        allVendors.forEach(v => {
+            if (v.latitude && v.longitude) {
+                let isOpen = v.is_open;
+                let firstLetter = (v.business_name && v.business_name.charAt(0)) || 'V';
+                let vendorIcon = L.divIcon({
+                    html: `<div class="custom-marker vendor-marker-${isOpen ? 'open' : 'closed'}">${firstLetter}</div>`,
+                    iconSize: [44, 44],
+                    className: ''
+                });
+                let marker = L.marker([v.latitude, v.longitude], { icon: vendorIcon }).bindPopup(`
+                    <b>${escapeHtml(v.business_name)}</b><br>
+                    ${escapeHtml(v.category)}<br>
+                    <span class="vendor-status ${isOpen?'open':'closed'}">${isOpen?'Open Now':'Closed'}</span><br>
+                    <button class="btn-outline btn-sm mt-1" onclick="showVendorModal('${v.id}'); map.closePopup();">View</button>
+                    <button class="btn-outline btn-sm mt-1" onclick="getDirections(${v.latitude}, ${v.longitude}, '${escapeHtml(v.business_name)}'); map.closePopup();">Directions</button>
+                `);
+                markerCluster.addLayer(marker);
+            }
         });
+        map.addLayer(markerCluster);
+        
+        if (heatActive) {
+            let points = [];
+            allVendors.forEach(v => { if (v.latitude) points.push([v.latitude, v.longitude, Math.min(0.8, (v.rating || 0) / 5 + 0.2)]); });
+            heatLayer = L.heatLayer(points, { radius: 35, blur: 20 }).addTo(map);
+        }
+        updateNearbyList();
     }, 100);
 }
 
-async function showVendorModal(vendorId) {
-    const v = allVendors.find(v => v.id === vendorId);
-    if (!v) return;
-    const isSaved = savedVendors.some(sv => sv.id === v.id);
-    const isFollowed = followedVendors.some(fv => fv.id === vendorId);
-    const products = allProducts.filter(p => p.vendor?.id === vendorId);
+function updateNearbyList() {
+    let list = document.getElementById('nearbyList');
+    if (list && allVendors.length) {
+        let filtered = allVendors.filter(v => v.distance && v.distance <= userPreferences.maxDistance);
+        let sorted = [...filtered].sort((a,b) => (a.distance||999) - (b.distance||999)).slice(0,8);
+        list.innerHTML = `<h4 class="mb-2">Nearby (within ${userPreferences.maxDistance}m)</h4>` + sorted.map(v => `<div class="card" onclick="showVendorModal('${v.id}')"><div class="flex justify-between"><strong>${escapeHtml(v.business_name)}</strong><span class="text-secondary">${Math.round(v.distance)}m</span></div><div class="text-secondary">${escapeHtml(v.category)}</div><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating||0))}</div></div>`).join('');
+    }
+}
+
+function filterMapMarkers() {
+    let query = document.getElementById('searchBox')?.value.toLowerCase() || '';
+    if (!markerCluster) return;
+    markerCluster.clearLayers();
+    allVendors.forEach(v => {
+        if (v.latitude && v.longitude && (v.business_name.toLowerCase().includes(query) || v.category.toLowerCase().includes(query))) {
+            let isOpen = v.is_open;
+            let firstLetter = (v.business_name && v.business_name.charAt(0)) || 'V';
+            let vendorIcon = L.divIcon({
+                html: `<div class="custom-marker vendor-marker-${isOpen ? 'open' : 'closed'}">${firstLetter}</div>`,
+                iconSize: [44, 44],
+                className: ''
+            });
+            markerCluster.addLayer(L.marker([v.latitude, v.longitude], { icon: vendorIcon }));
+        }
+    });
+}
+
+function centerOnUser() { if(map && userLocation) map.setView([userLocation.lat, userLocation.lng], 16); }
+
+function toggleHeatmap() {
+    heatActive = !heatActive;
+    let btn = document.getElementById('heatBtn');
+    if (heatActive) {
+        let points = [];
+        allVendors.forEach(v => { if (v.latitude) points.push([v.latitude, v.longitude, Math.min(0.8, (v.rating || 0) / 5 + 0.2)]); });
+        heatLayer = L.heatLayer(points, { radius: 35, blur: 20 }).addTo(map);
+        btn.classList.add('active');
+        showToast('Heatmap enabled');
+    } else {
+        if (heatLayer) map.removeLayer(heatLayer);
+        btn.classList.remove('active');
+        showToast('Heatmap disabled');
+    }
+}
+
+function showVendors() {
+    let vendorCategories = [...new Set(allVendors.map(v => v.category).filter(c => c))].sort();
+    document.getElementById('content').innerHTML = `
+        <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="vendorSearch" placeholder="Search vendors..." oninput="filterVendorList()"></div>
+        <div class="filter-chips" id="categoryFilters">${vendorCategories.slice(0,12).map(c => `<div class="chip" onclick="filterByCategory('${c}')">${c}</div>`).join('')}<div class="chip active" onclick="filterByCategory('all')">All</div></div>
+        <div id="vendorsContainer"></div>`;
+    filterVendorList();
+}
+
+let activeVendorCat = 'all';
+function filterByCategory(cat) { 
+    activeVendorCat = cat; 
+    let chips = document.querySelectorAll('#categoryFilters .chip');
+    chips.forEach(c => c.classList.remove('active'));
+    if(cat !== 'all') event.target.classList.add('active');
+    else chips[chips.length-1].classList.add('active');
+    filterVendorList(); 
+}
+
+function filterVendorList() {
+    let query = document.getElementById('vendorSearch')?.value.toLowerCase() || '';
+    let filtered = allVendors.filter(v => (v.business_name.toLowerCase().includes(query) || v.category.toLowerCase().includes(query)));
+    if (activeVendorCat !== 'all') filtered = filtered.filter(v => v.category === activeVendorCat);
     
-    document.getElementById('modalTitle').innerHTML = `<i class="fas fa-store"></i> ${v.business_name}`;
-    document.getElementById('modalBody').innerHTML = `
-        <p><span class="badge">${v.category}</span> <span class="vendor-status ${v.is_open ? 'open' : 'closed'}">${v.is_open ? 'Open Now' : 'Closed'}</span></p>
-        <p><i class="fas fa-map-marker-alt"></i> ${v.address || 'No address'}</p>
-        <p><i class="fas fa-star" style="color:#ffb800;"></i> ${v.rating || 'New'} (${v.review_count || 0} reviews)</p>
-        <div class="flex gap-2 mt-2">
-            <button class="btn-outline btn-sm" onclick="followVendor('${v.id}')"><i class="fas ${isFollowed ? 'fa-check-circle' : 'fa-bell'}"></i> ${isFollowed ? 'Following' : 'Follow'}</button>
-            <button class="btn-outline btn-sm" onclick="toggleSave('${v.id}')"><i class="fas ${isSaved ? 'fa-bookmark' : 'fa-bookmark'}"></i> ${isSaved ? 'Saved' : 'Save'}</button>
-            <button class="btn-outline btn-sm" onclick="openMinimap(${v.latitude}, ${v.longitude}, '${v.business_name}')"><i class="fas fa-map"></i> Map</button>
+    let savedIds = new Set(savedVendors.map(v => v.id));
+    let followedIds = new Set(followedVendors.map(v => v.id));
+    let saved = filtered.filter(v => savedIds.has(v.id));
+    let followed = filtered.filter(v => followedIds.has(v.id) && !savedIds.has(v.id));
+    let others = filtered.filter(v => !savedIds.has(v.id) && !followedIds.has(v.id));
+    
+    let container = document.getElementById('vendorsContainer');
+    if (container) {
+        container.innerHTML = `
+            ${saved.length ? `<h4 class="mt-2">Saved Vendors</h4>${saved.map(v => vendorCardWithActions(v)).join('')}` : ''}
+            ${followed.length ? `<h4 class="mt-3">Following</h4>${followed.map(v => vendorCardWithActions(v)).join('')}` : ''}
+            ${others.length ? `<h4 class="mt-3">All Vendors</h4>${others.map(v => vendorCard(v)).join('')}` : ''}
+            ${!saved.length && !followed.length && !others.length ? '<div class="card text-center">No vendors found</div>' : ''}
+        `;
+    }
+}
+
+function vendorCard(v) {
+    return `<div class="card" onclick="showVendorModal('${v.id}')"><div class="flex justify-between items-center"><div><strong>${escapeHtml(v.business_name)}</strong><div class="text-secondary">${escapeHtml(v.category)}</div><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating||0))}</div></div><span class="vendor-status ${v.is_open?'open':'closed'}">${v.is_open?'Open':'Closed'}</span></div></div>`;
+}
+
+function vendorCardWithActions(v) {
+    return `<div class="card"><div class="flex justify-between items-center"><div onclick="showVendorModal('${v.id}')" style="flex:1"><strong>${escapeHtml(v.business_name)}</strong><div class="text-secondary">${escapeHtml(v.category)}</div><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating||0))}</div></div><div class="flex gap-2"><button class="btn-outline btn-sm" onclick="event.stopPropagation(); unsaveVendor('${v.id}')"><i class="fas fa-trash-alt"></i> Unsave</button><button class="btn-outline btn-sm" onclick="event.stopPropagation(); unfollowVendor('${v.id}')"><i class="fas fa-bell-slash"></i> Unfollow</button></div></div></div>`;
+}
+
+async function unsaveVendor(vendorId) {
+    await api('/api/customer/shortlist/toggle', { method: 'POST', body: JSON.stringify({ vendor_id: vendorId }) });
+    await loadSaved();
+    showToast('Removed from saved');
+    if (page === 'vendors') showVendors();
+}
+
+async function unfollowVendor(vendorId) {
+    await api('/api/customer/follow-vendor', { method: 'POST', body: JSON.stringify({ vendor_id: vendorId }) });
+    await loadFollows();
+    showToast('Unfollowed vendor');
+    if (page === 'vendors') showVendors();
+}
+
+function showSavedVendors() {
+    let savedList = allVendors.filter(v => savedVendors.some(s => s.id === v.id));
+    document.getElementById('content').innerHTML = `<div class="flex justify-between items-center mb-3"><h3>Saved Vendors</h3><button class="btn-outline btn-sm" onclick="showPage('vendors')">Back</button></div>${savedList.map(v => `<div class="card flex justify-between items-center"><div><strong>${escapeHtml(v.business_name)}</strong><div class="text-secondary">${escapeHtml(v.category)}</div></div><button class="btn-outline btn-sm" onclick="unsaveVendor('${v.id}'); this.closest('.card').remove()">Unsave</button></div>`).join('') || '<div class="card text-center">No saved vendors</div>'}`;
+}
+
+function showFollowedVendors() {
+    let followedList = allVendors.filter(v => followedVendors.some(f => f.id === v.id));
+    document.getElementById('content').innerHTML = `<div class="flex justify-between items-center mb-3"><h3>Following Vendors</h3><button class="btn-outline btn-sm" onclick="showPage('vendors')">Back</button></div>${followedList.map(v => `<div class="card flex justify-between items-center"><div><strong>${escapeHtml(v.business_name)}</strong><div class="text-secondary">${escapeHtml(v.category)}</div></div><button class="btn-outline btn-sm" onclick="unfollowVendor('${v.id}'); this.closest('.card').remove()">Unfollow</button></div>`).join('') || '<div class="card text-center">Not following any vendors</div>'}`;
+}
+
+function showProducts() {
+    let productCategories = [...new Set(allProducts.map(p => p.category).filter(c => c))].sort();
+    document.getElementById('content').innerHTML = `
+        <div class="search-bar"><i class="fas fa-search"></i><input id="productSearch" placeholder="Search products..." oninput="filterProductList()"></div>
+        <div class="filter-chips" id="productFilters">${productCategories.slice(0,10).map(c => `<div class="chip" onclick="filterProductByCat('${c}')">${c}</div>`).join('')}<div class="chip active" onclick="filterProductByCat('all')">All</div></div>
+        <div id="recommendedSection"></div>
+        <div id="allProductsSection"></div>`;
+    filterProductList();
+}
+
+let activeProductCat = 'all';
+function filterProductByCat(cat) { 
+    activeProductCat = cat; 
+    let chips = document.querySelectorAll('#productFilters .chip');
+    chips.forEach(c => c.classList.remove('active'));
+    if(cat !== 'all') event.target.classList.add('active');
+    else chips[chips.length-1].classList.add('active');
+    filterProductList(); 
+}
+
+function getRecommendationScore(product) {
+    let score = 0;
+    if (userPreferences.categories.includes(product.category)) score += 30;
+    if (savedVendors.some(s => s.id === product.vendor?.id)) score += 25;
+    if (followedVendors.some(f => f.id === product.vendor?.id)) score += 20;
+    if (activityLog.lastViewedVendor && product.vendor?.business_name === activityLog.lastViewedVendor) score += 15;
+    if (activityLog.lastViewedProduct && product.name === activityLog.lastViewedProduct) score += 10;
+    if (product.price >= userPreferences.priceMin && product.price <= userPreferences.priceMax) score += 5;
+    return score;
+}
+
+function filterProductList() {
+    let query = document.getElementById('productSearch')?.value.toLowerCase() || '';
+    let filtered = allProducts.filter(p => {
+        let matchesSearch = p.name.toLowerCase().includes(query) || (p.category && p.category.toLowerCase().includes(query));
+        let matchesCategory = (activeProductCat === 'all') || (p.category === activeProductCat);
+        return matchesSearch && matchesCategory;
+    });
+    
+    let recommended = filtered.filter(p => getRecommendationScore(p) > 0).sort((a,b) => getRecommendationScore(b) - getRecommendationScore(a)).slice(0,8);
+    let allFiltered = filtered.sort((a,b) => a.name.localeCompare(b.name));
+    
+    let recSection = document.getElementById('recommendedSection');
+    if (recSection) {
+        if (recommended.length > 0) {
+            recSection.innerHTML = `<div class="card suggestion-card"><h4><i class="fas fa-star" style="color:#3a7b4d"></i> Recommended for You</h4><p class="text-secondary" style="font-size:12px">Based on your preferences and activity</p><div class="product-grid mt-2">${recommended.map(p => productCard(p)).join('')}</div></div>`;
+        } else {
+            recSection.innerHTML = '';
+        }
+    }
+    
+    let allSection = document.getElementById('allProductsSection');
+    if (allSection) {
+        if (allFiltered.length > 0) {
+            allSection.innerHTML = `<h4 class="mt-3">All Products (${allFiltered.length})</h4><div class="product-grid">${allFiltered.map(p => productCard(p)).join('')}</div>`;
+        } else {
+            allSection.innerHTML = '<div class="card text-center">No products found. Try adjusting your filters.</div>';
+        }
+    }
+}
+
+function productCard(p) {
+    let imageUrl = '';
+    if (p.images && p.images.length > 0) {
+        if (typeof p.images[0] === 'string') imageUrl = p.images[0];
+        else if (p.images[0].thumbnail) imageUrl = p.images[0].thumbnail;
+        else if (p.images[0].full) imageUrl = p.images[0].full;
+    }
+    
+    let priceHtml = `<span class="product-price">₱${p.price}</span>`;
+    if (p.priceTiers && p.priceTiers.length > 0) {
+        let bestTier = p.priceTiers.reduce((best, tier) => (tier.price < best.price ? tier : best), p.priceTiers[0]);
+        priceHtml = `<span class="product-price">₱${bestTier.price}</span> <span class="badge" style="background:#e3f5e3;padding:2px 6px;border-radius:12px;font-size:10px">${bestTier.minQty}+ for ₱${bestTier.price}</span>`;
+    }
+    
+    return `<div class="product-card" onclick="showProductAndVendor('${p.id}', '${p.vendor?.id}')">
+        <div class="product-image">${imageUrl ? `<img src="${imageUrl}" onerror="this.src='https://placehold.co/400x400/f0f4f0/8da38d?text=No+Image'">` : '<i class="fas fa-utensils" style="font-size:32px;color:#8da38d"></i>'}</div>
+        <div class="product-info">
+            <div class="product-name">${escapeHtml(p.name)}</div>
+            <div>${priceHtml}</div>
+            <div class="text-secondary" style="font-size:10px">${escapeHtml(p.vendor?.business_name || '')}</div>
         </div>
-        <div class="mt-3"><strong><i class="fas fa-utensils"></i> Menu</strong></div>
-        <div id="menuItems">${products.map(p => `
-            <div class="menu-item" style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #e8ece8;cursor:pointer" onclick="showProductModal('${p.id}', '${v.id}')">
-                ${p.images && p.images[0] ? `<div style="width:60px;height:60px;border-radius:12px;overflow:hidden"><img src="${p.images[0].thumbnail}" style="width:100%;height:100%;object-fit:cover"></div>` : `<div style="width:60px;height:60px;border-radius:12px;background:#f0f4f0;display:flex;align-items:center;justify-content:center"><i class="fas fa-utensils"></i></div>`}
-                <div class="flex-1">
-                    <div class="menu-item-name" style="font-weight:600">${p.name}</div>
-                    <div class="menu-item-price" style="color:#2d8c3c;font-weight:700">₱${p.price}</div>
-                </div>
-            </div>
-        `).join('') || '<p class="text-secondary">No menu items yet</p>'}</div>
-        <button class="btn-outline mt-3" onclick="writeReview('${v.id}')"><i class="fas fa-star"></i> Write a Review</button>
+    </div>`;
+}
+
+function showProductAndVendor(productId, vendorId) {
+    let product = allProducts.find(p => p.id == productId);
+    if(product) {
+        activityLog.lastViewedProduct = product.name;
+        let priceInfo = `₱${product.price}`;
+        if (product.priceTiers && product.priceTiers.length) {
+            priceInfo += ` (bulk: ${product.priceTiers.map(t => `${t.minQty}+ = ₱${t.price}`).join(', ')})`;
+        }
+        showToast(`${product.name} - ${priceInfo}`);
+        if(vendorId) showVendorModal(vendorId);
+    }
+}
+
+async function showVendorModal(vendorId) {
+    let v = allVendors.find(v => v.id === vendorId);
+    if (!v) return;
+    activityLog.lastViewedVendor = v.business_name;
+    let isSaved = savedVendors.some(s => s.id === v.id);
+    let isFollowed = followedVendors.some(f => f.id === vendorId);
+    let products = allProducts.filter(p => p.vendor?.id === vendorId);
+    let vendorPostsList = await loadVendorPosts(vendorId);
+    
+    document.getElementById('modalTitle').innerHTML = escapeHtml(v.business_name);
+    document.getElementById('modalBody').innerHTML = `
+        <div class="flex gap-2 mb-3">
+            <button class="btn-outline btn-sm" onclick="followVendor('${v.id}')"><i class="fas ${isFollowed ? 'fa-bell-slash' : 'fa-bell'}"></i> ${isFollowed ? 'Unfollow' : 'Follow'}</button>
+            <button class="btn-outline btn-sm" onclick="toggleSave('${v.id}')"><i class="fas ${isSaved ? 'fa-trash' : 'fa-bookmark'}"></i> ${isSaved ? 'Unsave' : 'Save'}</button>
+            <button class="btn-outline btn-sm" onclick="getDirections(${v.latitude}, ${v.longitude}, '${escapeHtml(v.business_name)}')"><i class="fas fa-directions"></i> Directions</button>
+        </div>
+        <div class="text-secondary">${escapeHtml(v.category)} • ${Math.round(v.distance) || '?'}m away</div>
+        <div class="stars mt-1">${'★'.repeat(Math.floor(v.rating||0))} <span class="text-secondary">(${v.review_count||0} reviews)</span></div>
+        <div class="mt-3"><strong>Menu</strong></div>
+        ${products.map(p => `<div class="flex justify-between items-center py-2 border-b cursor-pointer" onclick="showProductAndVendor('${p.id}', '${v.id}')"><div>${escapeHtml(p.name)}${p.priceTiers && p.priceTiers.length ? `<small class="price-tier-badge">${p.priceTiers[0].minQty}+ for ₱${p.priceTiers[0].price}</small>` : ''}</div><div class="product-price">₱${p.price}</div></div>`).join('') || '<div class="text-secondary">No menu items yet</div>'}
+        ${vendorPostsList.length ? `<div class="mt-3"><strong>Vendor Posts</strong></div>${vendorPostsList.slice(0,3).map(post => `<div class="mt-2 pt-2 border-t"><div class="post-content" style="font-size:13px">${escapeHtml(post.content.substring(0,100))}${post.content.length>100?'...':''}</div><div class="text-secondary" style="font-size:11px">${timeAgo(post.created_at)} • ${post.likes || 0} likes</div></div>`).join('')}` : ''}
+        <button class="btn-outline mt-3" onclick="openReviewModal('${v.id}')"><i class="fas fa-star"></i> Write a Review</button>
         <div id="reviewsList" class="mt-3"></div>`;
     document.getElementById('vendorModal').classList.add('show');
     loadVendorReviews(vendorId);
 }
 
 async function loadVendorReviews(vendorId) {
-    const data = await api(`/api/customer/reviews/${vendorId}`);
-    const reviewsDiv = document.getElementById('reviewsList');
+    let data = await api(`/api/customer/reviews/${vendorId}`);
+    let reviewsDiv = document.getElementById('reviewsList');
     if (data?.reviews && data.reviews.length) {
-        reviewsDiv.innerHTML = `<strong><i class="fas fa-comments"></i> Reviews</strong>` + data.reviews.slice(0,3).map(r => `
-            <div class="mt-2 pt-2" style="border-top:1px solid #e8ece8"><div class="stars">${'★'.repeat(r.rating)}</div><p class="text-secondary">${r.comment || ''}</p><small>${new Date(r.created_at).toLocaleDateString()}</small></div>
-        `).join('');
+        reviewsDiv.innerHTML = `<strong>Customer Reviews</strong>` + data.reviews.slice(0,5).map(r => `<div class="mt-2 pt-2 border-t"><div class="stars">${'★'.repeat(r.rating)}</div><p class="text-secondary">${escapeHtml(r.comment || '')}</p><small>${new Date(r.created_at).toLocaleDateString()}</small></div>`).join('');
     }
 }
 
-async function followVendor(vendorId) {
-    const res = await api('/api/customer/follow-vendor', { method: 'POST', body: JSON.stringify({ vendor_id: vendorId }) });
+async function followVendor(id) {
+    await api('/api/customer/follow-vendor', { method: 'POST', body: JSON.stringify({ vendor_id: id }) });
     await loadFollows();
-    showToast(res?.action === 'followed' ? 'Following vendor!' : 'Unfollowed vendor');
     closeModal();
-    showVendorModal(vendorId);
+    showVendorModal(id);
 }
 
-async function toggleSave(vendorId) {
-    await api('/api/customer/shortlist/toggle', { method: 'POST', body: JSON.stringify({ vendor_id: vendorId }) });
+async function toggleSave(id) {
+    await api('/api/customer/shortlist/toggle', { method: 'POST', body: JSON.stringify({ vendor_id: id }) });
     await loadSaved();
-    showToast('Updated saved vendors');
+    closeModal();
+    showVendorModal(id);
+}
+
+function openReviewModal(vendorId) {
+    currentReviewVendorId = vendorId;
+    currentRating = 0;
+    document.querySelectorAll('.review-star').forEach(s => s.style.color = '#ddd');
+    document.getElementById('reviewModal').classList.add('show');
+}
+
+async function submitReview() {
+    if (currentRating === 0) { showToast('Please select a rating'); return; }
+    let comment = document.getElementById('reviewComment').value;
+    await api('/api/customer/review/create', { method: 'POST', body: JSON.stringify({ vendor_id: currentReviewVendorId, rating: currentRating, comment: comment }) });
+    showToast('Thank you for your review!');
+    closeReviewModal();
     closeModal();
 }
 
-async function writeReview(vendorId) {
-    const rating = prompt('Rate (1-5 stars):');
-    if (rating && rating >= 1 && rating <= 5) {
-        const comment = prompt('Your review:');
-        await api('/api/customer/review/create', { method: 'POST', body: JSON.stringify({ vendor_id: vendorId, rating: parseInt(rating), comment }) });
-        showToast('Thank you for your review!');
-        closeModal();
+document.addEventListener('click', function(e) {
+    let star = e.target.closest('.review-star');
+    if (star && document.getElementById('reviewModal').classList.contains('show')) {
+        currentRating = parseInt(star.dataset.rating);
+        document.querySelectorAll('.review-star').forEach((s, i) => { s.style.color = i < currentRating ? '#f5b042' : '#ddd'; });
     }
-}
+});
 
-function openMinimap(lat, lng, name) {
-    document.getElementById('minimapModal').classList.add('show');
+function getDirections(lat, lng, name) {
+    if (!userLocation) { showToast('Getting your location...'); return; }
+    let modal = document.getElementById('minimapModal');
+    modal.classList.add('show');
     setTimeout(() => {
         if (minimap) minimap.remove();
-        minimap = L.map('minimapContainer').setView([lat, lng], 15);
+        minimap = L.map('minimapContainer', { zoomControl: true }).setView([(userLocation.lat + lat)/2, (userLocation.lng + lng)/2], 13);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(minimap);
-        L.marker([lat, lng]).bindPopup(`<b>${name}</b>`).addTo(minimap);
-        if (userLocation) {
-            L.marker([userLocation.lat, userLocation.lng]).bindPopup('<b>You are here</b>').addTo(minimap);
-            minimap.setView([(userLocation.lat + lat)/2, (userLocation.lng + lng)/2], 13);
-            if (minimapRouting) minimap.removeControl(minimapRouting);
-            minimapRouting = L.Routing.control({
-                waypoints: [L.latLng(userLocation.lat, userLocation.lng), L.latLng(lat, lng)],
-                routeWhileDragging: false,
-                lineOptions: { styles: [{ color: '#2d8c3c', weight: 4 }] },
-                createMarker: () => null
-            }).addTo(minimap);
-        }
+        L.circle([userLocation.lat, userLocation.lng], { radius: 10, color: '#3a7b4d', fillColor: '#3a7b4d', fillOpacity: 0.8 }).addTo(minimap).bindPopup('You are here');
+        L.marker([lat, lng]).bindPopup(`<b>${escapeHtml(name)}</b>`).addTo(minimap);
     }, 100);
 }
 
-function centerMinimapOnUser() {
-    if (userLocation && minimap) minimap.setView([userLocation.lat, userLocation.lng], 15);
+function centerMinimap() { if (minimap && userLocation) minimap.setView([userLocation.lat, userLocation.lng], 15); }
+function openGoogleMaps() { if (userLocation) window.open(`https://www.google.com/maps/dir/${userLocation.lat},${userLocation.lng}`, '_blank'); }
+function closeMinimap() { document.getElementById('minimapModal').classList.remove('show'); }
+
+async function showFeed() {
+    await loadFeed();
+    document.getElementById('content').innerHTML = `<div class="flex justify-between items-center mb-3"><h3>Community Feed</h3><button class="btn-outline btn-sm" onclick="openPostModal()"><i class="fas fa-plus"></i> Create Post</button></div><div id="feedList"></div>`;
+    
+    document.getElementById('feedList').innerHTML = allPosts.map(p => `
+        <div class="card">
+            <div class="flex justify-between items-start">
+                <div class="flex items-center gap-2">
+                    <div class="avatar avatar-sm" style="width:40px;height:40px;font-size:18px;cursor:pointer" onclick="showUserProfile('${p.user_id}')"><i class="fas fa-user-circle"></i></div>
+                    <div style="cursor:pointer" onclick="showUserProfile('${p.user_id}')"><strong>${escapeHtml(p.author || 'Food Lover')}</strong><div class="text-secondary">${timeAgo(p.created_at)}</div></div>
+                </div>
+            </div>
+            <p class="mt-2">${escapeHtml(p.content)}</p>
+            ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail || img}"></div>`).join('')}</div>` : ''}
+            <div class="post-actions">
+                <button class="post-action-btn ${p.user_liked ? 'liked' : ''}" onclick="likePost('${p.id}', this)"><i class="far fa-heart"></i> <span class="like-count">${p.likes || 0}</span></button>
+                <button class="post-action-btn" onclick="toggleComments('${p.id}')"><i class="far fa-comment"></i> <span id="commentCount-${p.id}">${p.comment_count || 0}</span></button>
+                <button class="post-action-btn" onclick="openShareModal('${p.id}')"><i class="far fa-share-alt"></i> Share</button>
+            </div>
+            <div id="comments-${p.id}" style="display:none" class="comment-thread"></div>
+        </div>
+    `).join('');
 }
 
-function openExternalMaps() {
-    if (minimapRouting && minimapRouting.getWaypoints && minimapRouting.getWaypoints().length > 1) {
-        const dest = minimapRouting.getWaypoints()[1].latLng;
-        window.open(`https://www.google.com/maps/dir/${userLocation.lat},${userLocation.lng}/${dest.lat},${dest.lng}`, '_blank');
+async function loadComments(postId) {
+    let data = await api(`/api/customer/post/comments/${postId}`);
+    let comments = data?.comments || [];
+    let div = document.getElementById(`comments-${postId}`);
+    if (div) {
+        if (comments.length === 0) div.innerHTML = '<div class="text-secondary text-center">No comments yet. Be the first!</div>';
+        else div.innerHTML = comments.map(c => `
+            <div class="comment-item">
+                <div class="comment-author" onclick="showUserProfile('${c.user_id}')"><strong>${escapeHtml(c.author || 'User')}</strong></div>
+                <div>${escapeHtml(c.content)}</div>
+                <div class="flex justify-between mt-1">
+                    <small>${timeAgo(c.created_at)}</small>
+                    ${c.user_id === currentUserId ? `<button class="btn-outline btn-sm delete-btn" onclick="deleteComment('${c.id}', '${postId}')" style="color:#e53935;border-color:#e53935">Delete</button>` : ''}
+                </div>
+            </div>
+        `).join('');
+        div.innerHTML += `<div class="mt-2"><button class="btn-outline btn-sm" onclick="openReplyModal('${postId}')"><i class="fas fa-reply"></i> Write a reply</button></div>`;
     }
 }
 
-function closeMinimap() { document.getElementById('minimapModal').classList.remove('show'); if(minimapRouting) minimap.removeControl(minimapRouting); }
-function centerOnUser() { if (map && userLocation) { map.setView([userLocation.lat, userLocation.lng], 15); showToast('Recentered'); } }
-function toggleHeatmap() { heatActive = !heatActive; const btn = document.getElementById('heatBtn'); if (heatActive) { const points = allVendors.filter(v => v.latitude).map(v => [v.latitude, v.longitude, 0.5]); heatLayer = L.heatLayer(points, { radius: 25 }).addTo(map); btn.style.background = '#2d8c3c'; btn.style.color = 'white'; showToast('Heatmap enabled'); } else { if (heatLayer) map.removeLayer(heatLayer); btn.style.background = 'white'; btn.style.color = '#2d8c3c'; showToast('Heatmap disabled'); } }
-function toggleGeofence() { fenceActive = !fenceActive; const btn = document.getElementById('fenceBtn'); if (fenceActive) { fenceLayer = L.circle([userLocation.lat, userLocation.lng], { radius: 3000, color: '#2d8c3c', fillColor: '#2d8c3c', fillOpacity: 0.05 }).addTo(map); btn.style.background = '#2d8c3c'; btn.style.color = 'white'; showToast('3km geofence enabled'); } else { if (fenceLayer) map.removeLayer(fenceLayer); btn.style.background = 'white'; btn.style.color = '#2d8c3c'; showToast('Geofence disabled'); } }
-function toggleCluster() { location.reload(); }
+async function deleteComment(commentId, postId) {
+    if (!confirm('Delete this comment?')) return;
+    let res = await api('/api/customer/comment/delete', { method: 'POST', body: JSON.stringify({ comment_id: commentId }) });
+    if (res && res.success) {
+        await loadComments(postId);
+        await loadFeed();
+        let countSpan = document.getElementById(`commentCount-${postId}`);
+        if (countSpan) countSpan.innerText = Math.max(0, (parseInt(countSpan.innerText) || 0) - 1);
+        showToast('Comment deleted');
+    }
+}
 
+async function likePost(postId, btn) {
+    let res = await api('/api/customer/like', { method: 'POST', body: JSON.stringify({ post_id: postId }) });
+    if (res && res.success) {
+        let span = btn.querySelector('.like-count');
+        let count = parseInt(span.innerText) || 0;
+        if (res.liked) { btn.classList.add('liked'); span.innerText = count + 1; }
+        else { btn.classList.remove('liked'); span.innerText = Math.max(0, count - 1); }
+        await loadFeed();
+    }
+}
+
+function toggleComments(postId) {
+    let el = document.getElementById(`comments-${postId}`);
+    if (el.style.display === 'none') { el.style.display = 'block'; loadComments(postId); }
+    else el.style.display = 'none';
+}
+
+function openReplyModal(postId) { document.getElementById('replyPostId').value = postId; document.getElementById('replyContent').value = ''; document.getElementById('replyModal').classList.add('show'); }
+async function submitReply() {
+    let postId = document.getElementById('replyPostId').value;
+    let content = document.getElementById('replyContent').value;
+    if (!content) { showToast('Write something'); return; }
+    let res = await api('/api/customer/comment', { method: 'POST', body: JSON.stringify({ post_id: postId, comment: content }) });
+    if (res && res.success) {
+        closeReplyModal();
+        await loadComments(postId);
+        await loadFeed();
+        let countSpan = document.getElementById(`commentCount-${postId}`);
+        if (countSpan) countSpan.innerText = (parseInt(countSpan.innerText) || 0) + 1;
+        showToast('Reply posted!');
+    }
+}
+function closeReplyModal() { document.getElementById('replyModal').classList.remove('show'); }
 function openPostModal() { document.getElementById('postModal').classList.add('show'); }
 function closePostModal() { document.getElementById('postModal').classList.remove('show'); }
-
-function previewPostImages(input) {
-    const previewDiv = document.getElementById('postImagePreview');
-    previewDiv.innerHTML = '';
-    for (let i = 0; i < input.files.length; i++) {
-        const reader = new FileReader();
-        reader.onload = e => { previewDiv.innerHTML += `<div class="image-preview"><img src="${e.target.result}" style="width:70px;height:70px;object-fit:cover;border-radius:8px"></div>`; };
-        reader.readAsDataURL(input.files[i]);
-    }
-}
-
+function previewPostImages(input) { let preview = document.getElementById('postImagePreview'); preview.innerHTML = ''; for(let f of input.files){ let reader=new FileReader(); reader.onload=e=>{ preview.innerHTML+=`<div class="image-thumb"><img src="${e.target.result}"></div>`; }; reader.readAsDataURL(f); } }
 async function createPost() {
-    const content = document.getElementById('postContent').value;
-    if (!content) { showToast('Write something!'); return; }
-    const files = document.getElementById('postImages').files;
-    const images = [];
-    for (let file of files) {
-        const reader = new FileReader();
-        const imgData = await new Promise(resolve => { reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
+    let content = document.getElementById('postContent').value;
+    if (!content) { showToast('Write something first!'); return; }
+    let files = document.getElementById('postImages').files;
+    let images = [];
+    for(let file of files){
+        let imgData = await new Promise(resolve => { let reader = new FileReader(); reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
         images.push(imgData);
     }
-    const res = await api('/api/customer/post/create', { method: 'POST', body: JSON.stringify({ content, images }) });
-    if (res && res.success) {
-        closePostModal();
-        document.getElementById('postContent').value = '';
-        document.getElementById('postImages').value = '';
-        document.getElementById('postImagePreview').innerHTML = '';
-        showFeed();
-        showToast('Post shared!');
-    } else {
-        showToast('Failed to create post');
+    let res = await api('/api/customer/post/create', { method: 'POST', body: JSON.stringify({ content, images }) });
+    if(res && res.success){ closePostModal(); await loadFeed(); showFeed(); showToast('Post shared!'); }
+}
+function showProfile() {
+    let myPostsCount = allPosts.filter(p => p.user_id === currentUserId).length;
+    let likedCount = allPosts.filter(p => p.user_liked).length;
+    document.getElementById('content').innerHTML = `
+        <div class="card text-center"><div class="avatar-lg"><i class="fas fa-user-circle"></i></div><h3 class="mt-2">${escapeHtml(userProfile?.full_name || 'Food Explorer')}</h3><p class="text-secondary">${escapeHtml(userProfile?.email || '')}</p><div class="profile-stats"><div class="stat-card" onclick="showSavedVendors()"><div class="stat-value">${savedVendors.length}</div><div class="stat-label">Saved</div></div><div class="stat-card" onclick="showFollowedVendors()"><div class="stat-value">${followedVendors.length}</div><div class="stat-label">Following</div></div><div class="stat-card" onclick="showMyPosts()"><div class="stat-value">${myPostsCount}</div><div class="stat-label">Posts</div></div></div><button class="btn-outline mt-2" onclick="openProfileModal()">Edit Profile</button></div>
+        <div class="card mt-3"><h4>Recent Activity</h4>${activityLog.lastViewedVendor ? `<div class="activity-item"><div class="activity-icon"><i class="fas fa-store"></i></div><div>Last viewed vendor: <strong>${escapeHtml(activityLog.lastViewedVendor)}</strong></div></div>` : ''}${activityLog.lastViewedProduct ? `<div class="activity-item"><div class="activity-icon"><i class="fas fa-utensils"></i></div><div>Last viewed product: <strong>${escapeHtml(activityLog.lastViewedProduct)}</strong></div></div>` : ''}${!activityLog.lastViewedVendor && !activityLog.lastViewedProduct ? '<div class="text-secondary text-center">No recent activity yet</div>' : ''}</div>
+        <div class="card"><div class="flex justify-between items-center"><h4>Liked Posts (${likedCount})</h4>${likedCount > 0 ? `<button class="btn-outline btn-sm" onclick="showLikedPosts()">View All</button>` : ''}</div><div id="likedPreview"></div></div>`;
+    let likedPreview = document.getElementById('likedPreview');
+    if(likedPreview){
+        let liked = allPosts.filter(p => p.user_liked).slice(0,3);
+        likedPreview.innerHTML = liked.map(p => `<div class="activity-item" style="cursor:pointer" onclick="showFeed()"><div class="activity-icon"><i class="fas fa-heart" style="color:#e53935"></i></div><div><div>${escapeHtml(p.content.substring(0,60))}${p.content.length>60?'...':''}</div><div class="text-secondary" style="font-size:11px">by ${escapeHtml(p.author || 'User')}</div></div></div>`).join('') || '<div class="text-secondary text-center">No liked posts yet</div>';
     }
 }
-
-function closeModal() { document.getElementById('vendorModal').classList.remove('show'); }
-function closeAnalyticsModal() { document.getElementById('analyticsModal').classList.remove('show'); }
+function showMyPosts() { let myPosts = allPosts.filter(p => p.user_id === currentUserId); document.getElementById('content').innerHTML = `<div class="flex justify-between items-center mb-3"><h3>My Posts (${myPosts.length})</h3><button class="btn-outline btn-sm" onclick="showPage('profile')">Back</button></div>${myPosts.map(p => `<div class="card"><p>${escapeHtml(p.content)}</p><div class="text-secondary mt-1">${p.likes || 0} likes · ${p.comment_count || 0} comments</div><div class="text-secondary mt-1"><small>${new Date(p.created_at).toLocaleString()}</small></div></div>`).join('') || '<div class="card text-center">No posts yet</div>'}`; }
+function showLikedPosts() { let likedPostsList = allPosts.filter(p => p.user_liked); document.getElementById('content').innerHTML = `<div class="flex justify-between items-center mb-3"><h3>Liked Posts (${likedPostsList.length})</h3><button class="btn-outline btn-sm" onclick="showPage('profile')">Back</button></div>${likedPostsList.map(p => `<div class="card" onclick="showFeed()"><p>${escapeHtml(p.content)}</p><div class="text-secondary mt-1">by ${escapeHtml(p.author || 'User')} · ${p.likes || 0} likes</div></div>`).join('') || '<div class="card text-center">No liked posts yet</div>'}`; }
+async function openProfileModal() { let profile = await api('/api/customer/profile'); document.getElementById('profileName').value = profile?.full_name || ''; document.getElementById('profilePhone').value = profile?.phone || ''; document.getElementById('profileModal').classList.add('show'); }
+async function saveProfile() { await api('/api/customer/update-profile', { method: 'POST', body: JSON.stringify({ full_name: document.getElementById('profileName').value, phone: document.getElementById('profilePhone').value }) }); showToast('Profile updated'); closeProfileModal(); await loadProfile(); showProfile(); }
 function closeProfileModal() { document.getElementById('profileModal').classList.remove('show'); }
-function closeProductViewModal() { document.getElementById('productViewModal').classList.remove('show'); }
+function closeReviewModal() { document.getElementById('reviewModal').classList.remove('show'); }
+function closePreferencesModal() { document.getElementById('preferencesModal').classList.remove('show'); }
+function closeAnalyticsModal() { document.getElementById('analyticsModal').classList.remove('show'); }
+function closeModal() { document.getElementById('vendorModal').classList.remove('show'); }
+function closeUserProfileModal() { document.getElementById('userProfileModal').classList.remove('show'); }
 function toggleMenu() { document.getElementById('hamburgerMenu').classList.toggle('show'); }
-
-function showTutorial() {
-    const steps = [
-        { icon: "<i class='fas fa-map'></i>", title: "Welcome to Lako!", desc: "Discover the best street food vendors near you.", features: ["Real-time GPS vendor locations", "Browse menus with photos", "Save your favorites"] },
-        { icon: "<i class='fas fa-search'></i>", title: "Find Products", desc: "Search for specific food items from all vendors.", features: ["Filter by category", "Filter by price range", "Personalized recommendations"] },
-        { icon: "<i class='fas fa-newspaper'></i>", title: "Community Feed", desc: "See what others are saying about local food.", features: ["Follow vendors and users", "Like and comment on posts", "Relevant content first"] },
-        { icon: "<i class='fas fa-user'></i>", title: "Your Profile", desc: "Customize your experience and track your activity.", features: ["Upload profile photo", "View your saved vendors", "See your activity stats"] }
-    ];
-    let stepIndex = 0;
-    const modal = document.getElementById('tutorialModal');
-    const content = document.getElementById('tutorialContent');
-    function renderStep() {
-        const step = steps[stepIndex];
-        content.innerHTML = `<div class="tutorial-step"><div class="icon">${step.icon}</div><h3>${step.title}</h3><p>${step.desc}</p><div class="feature-list" style="text-align:left;background:#f8faf8;padding:16px;border-radius:20px;margin:16px 0">${step.features.map(f => `<li style="padding:8px 0;display:flex;align-items:center;gap:10px"><i class="fas fa-check-circle" style="color:#2d8c3c"></i> ${f}</li>`).join('')}</div><div class="tutorial-dots">${steps.map((_, i) => `<div class="tutorial-dot ${i === stepIndex ? 'active' : ''}" onclick="goToStep(${i})"></div>`).join('')}</div><div class="flex gap-2">${stepIndex > 0 ? '<button class="btn-outline" onclick="prevStep()">Back</button>' : ''}<button class="btn" onclick="${stepIndex === steps.length-1 ? 'closeTutorial()' : 'nextStep()'}">${stepIndex === steps.length-1 ? 'Get Started' : 'Next'}</button></div></div>`;
+function closeMenu() { document.getElementById('hamburgerMenu').classList.remove('show'); }
+function openShareModal(postId) { window.open(`https://www.facebook.com/sharer/sharer.php?u=${window.location.origin}/post/${postId}`, '_blank'); }
+async function showUserProfile(userId) {
+    if (userId === currentUserId) { showPage('profile'); return; }
+    let data = await api(`/api/customer/user/profile/${userId}`);
+    if(data){
+        document.getElementById('userProfileTitle').innerHTML = escapeHtml(data.full_name || 'User Profile');
+        document.getElementById('userProfileBody').innerHTML = `<div class="text-center"><div class="avatar-lg" style="margin:0 auto 16px"><i class="fas fa-user-circle"></i></div><h3>${escapeHtml(data.full_name || 'Food Lover')}</h3><p class="text-secondary">${escapeHtml(data.email || '')}</p><div class="profile-stats"><div class="stat-card"><div class="stat-value">${data.post_count || 0}</div><div class="stat-label">Posts</div></div><div class="stat-card"><div class="stat-value">${data.follower_count || 0}</div><div class="stat-label">Followers</div></div><div class="stat-card"><div class="stat-value">${data.following_count || 0}</div><div class="stat-label">Following</div></div></div></div>`;
+        document.getElementById('userProfileModal').classList.add('show');
     }
-    window.goToStep = (i) => { stepIndex = i; renderStep(); };
-    window.nextStep = () => { if(stepIndex < steps.length-1) { stepIndex++; renderStep(); } };
-    window.prevStep = () => { if(stepIndex > 0) { stepIndex--; renderStep(); } };
-    window.closeTutorial = () => { modal.style.display = 'none'; localStorage.setItem('tutorial_seen', 'true'); };
-    modal.style.display = 'flex';
-    renderStep();
 }
+function showPreferences() {
+    let allCategories = [...new Set(allProducts.map(p => p.category).filter(c => c))].sort();
+    document.getElementById('prefCategories').innerHTML = allCategories.map(c => `<div class="chip ${userPreferences.categories.includes(c) ? 'active' : ''}" onclick="togglePrefCategory('${c}')">${c}</div>`).join('');
+    document.getElementById('prefPriceMin').value = userPreferences.priceMin;
+    document.getElementById('prefPriceMax').value = userPreferences.priceMax;
+    document.getElementById('prefDistance').value = userPreferences.maxDistance;
+    document.getElementById('prefPriceMinVal').innerText = userPreferences.priceMin;
+    document.getElementById('prefPriceMaxVal').innerText = userPreferences.priceMax;
+    document.getElementById('prefDistanceVal').innerText = userPreferences.maxDistance + 'm';
+    document.getElementById('prefPriceMin').oninput = () => { document.getElementById('prefPriceMinVal').innerText = document.getElementById('prefPriceMin').value; };
+    document.getElementById('prefPriceMax').oninput = () => { document.getElementById('prefPriceMaxVal').innerText = document.getElementById('prefPriceMax').value; };
+    document.getElementById('prefDistance').oninput = () => { document.getElementById('prefDistanceVal').innerText = document.getElementById('prefDistance').value + 'm'; };
+    document.getElementById('preferencesModal').classList.add('show');
+}
+function togglePrefCategory(cat) { let idx = userPreferences.categories.indexOf(cat); if (idx === -1) userPreferences.categories.push(cat); else userPreferences.categories.splice(idx, 1); showPreferences(); }
+async function savePreferences() { userPreferences.priceMin = parseInt(document.getElementById('prefPriceMin').value); userPreferences.priceMax = parseInt(document.getElementById('prefPriceMax').value); userPreferences.maxDistance = parseInt(document.getElementById('prefDistance').value); await api('/api/customer/update-preferences', { method: 'POST', body: JSON.stringify(userPreferences) }); showToast('Preferences saved!'); closePreferencesModal(); if (page === 'map') updateNearbyList(); if (page === 'products') filterProductList(); }
+function showAnalytics() {
+    let myPostsCount = allPosts.filter(p => p.user_id === currentUserId).length;
+    let likedCount = allPosts.filter(p => p.user_liked).length;
+    document.getElementById('analyticsContent').innerHTML = `<div class="profile-stats"><div class="stat-card"><div class="stat-value">${savedVendors.length + followedVendors.length}</div><div class="stat-label">Interactions</div></div><div class="stat-card"><div class="stat-value">${myPostsCount}</div><div class="stat-label">My Posts</div></div><div class="stat-card"><div class="stat-value">${likedCount}</div><div class="stat-label">Liked</div></div></div><div class="card mt-3"><h4>Recent Activity</h4>${activityLog.lastViewedVendor ? `<div class="activity-item"><div class="activity-icon"><i class="fas fa-store"></i></div><div>Last vendor: ${escapeHtml(activityLog.lastViewedVendor)}</div></div>` : ''}${activityLog.lastViewedProduct ? `<div class="activity-item"><div class="activity-icon"><i class="fas fa-utensils"></i></div><div>Last product: ${escapeHtml(activityLog.lastViewedProduct)}</div></div>` : ''}</div>`;
+    document.getElementById('analyticsModal').classList.add('show');
+}
+function confirmLogout() { if(confirm('Logout from Lako?')) { if(watchId) navigator.geolocation.clearWatch(watchId); localStorage.clear(); window.location.href = '/'; } }
 
-function logout() { localStorage.clear(); window.location.href = '/'; }
+// Load Leaflet and dependencies
+(function loadLibraries() {
+    if(document.querySelector('link[href*="leaflet.css"]')) return;
+    let leafletCSS = document.createElement('link');
+    leafletCSS.rel = 'stylesheet';
+    leafletCSS.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(leafletCSS);
+    
+    let leafletScript = document.createElement('script');
+    leafletScript.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    leafletScript.onload = () => {
+        let clusterScript = document.createElement('script');
+        clusterScript.src = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';
+        document.head.appendChild(clusterScript);
+        
+        let heatScript = document.createElement('script');
+        heatScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js';
+        document.head.appendChild(heatScript);
+        
+        if(page === 'map') setTimeout(showMap, 100);
+    };
+    document.head.appendChild(leafletScript);
+})();
 
-// Load libraries
-let fa=document.createElement('link');fa.rel='stylesheet';fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';document.head.appendChild(fa);
-let leaflet=document.createElement('link');leaflet.rel='stylesheet';leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(leaflet);
-let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';leafletScript.onload=()=>{if(page==='map') setTimeout(showMap,100);};document.head.appendChild(leafletScript);
-let leafletRouting=document.createElement('script');leafletRouting.src='https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js';document.head.appendChild(leafletRouting);
-let leafletCluster=document.createElement('link');leafletCluster.rel='stylesheet';leafletCluster.href='https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css';document.head.appendChild(leafletCluster);
-let leafletClusterScript=document.createElement('script');leafletClusterScript.src='https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';document.head.appendChild(leafletClusterScript);
-let heatScript=document.createElement('script');heatScript.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js';document.head.appendChild(heatScript);
-let chartScript=document.createElement('script');chartScript.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';document.head.appendChild(chartScript);
-
-if(!localStorage.getItem('tutorial_seen')) setTimeout(showTutorial, 1000);
 loadData();
 </script>
 ''')
 
-# ============================================
-# VENDOR DASHBOARD (Updated with modern GUI)
-# ============================================
-
 VENDOR_DASH = render_page("Vendor Dashboard", '''
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-.app-bar{background:white;padding:16px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.back-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c;transition:all 0.2s}
-.back-btn:active{transform:scale(0.95);background:#e8f5e9}
-.app-bar-title{font-size:18px;font-weight:600;color:#1a2e1a;flex:1}
-.menu-btn{background:#f0f4f0;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#2d8c3c;transition:all 0.2s}
-.menu-btn:active{transform:scale(0.95);background:#e8f5e9}
-.content{padding:20px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:80px}
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:10px 16px 20px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;box-shadow:0 -2px 10px rgba(0,0,0,0.05);z-index:99}
-.nav-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8ba88b;font-size:12px;cursor:pointer;transition:all 0.2s}
+body{background:#f5f8f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.app-bar{background:white;padding:14px 20px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100}
+.back-btn{background:#eff3ef;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#3a7b4d}
+.back-btn:active{transform:scale(0.95)}
+.app-bar-title{font-size:18px;font-weight:600;color:#2c3e2c;flex:1}
+.menu-btn{background:#eff3ef;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#3a7b4d}
+.content{padding:20px 16px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:90px}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:8px 16px 22px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;z-index:99}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:5px;color:#9aae9a;font-size:11px;cursor:pointer}
 .nav-item i{font-size:22px}
-.nav-item.active{color:#2d8c3c}
+.nav-item.active{color:#3a7b4d}
 .nav-item span{font-size:11px;font-weight:500}
-.card{background:white;border-radius:24px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);transition:all 0.2s}
-.card:active{transform:scale(0.98)}
-.btn{width:100%;padding:14px;background:#2d8c3c;color:white;border:none;border-radius:44px;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.2s}
-.btn:active{transform:scale(0.97);background:#1a6b28}
-.btn-outline{background:white;border:1.5px solid #2d8c3c;color:#2d8c3c;padding:12px;border-radius:44px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}
-.btn-outline:active{transform:scale(0.97);background:#e8f5e9}
-.btn-sm{padding:8px 16px;font-size:13px;width:auto}
-.badge{background:#f0f4f0;padding:4px 12px;border-radius:20px;font-size:12px;color:#1a2e1a}
-.text-secondary{color:#8ba88b;font-size:13px}
+.card{background:white;border-radius:24px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #edf2ed}
+.btn{width:100%;padding:14px;background:#3a7b4d;color:white;border:none;border-radius:44px;font-size:15px;font-weight:600;cursor:pointer}
+.btn:active{transform:scale(0.97);background:#2e6640}
+.btn-outline{background:white;border:1.5px solid #3a7b4d;color:#3a7b4d;padding:12px;border-radius:44px;font-size:14px;font-weight:500;cursor:pointer}
+.btn-outline:active{background:#f0f6f0}
+.btn-sm{padding:8px 18px;font-size:13px;width:auto}
+.badge{background:#eff6ef;padding:4px 14px;border-radius:30px;font-size:12px;color:#3a7b4d}
+.text-secondary{color:#8da38d;font-size:13px}
 .text-center{text-align:center}
-.mt-1{margin-top:4px}
-.mt-2{margin-top:8px}
-.mt-3{margin-top:12px}
-.mt-4{margin-top:16px}
-.mb-2{margin-bottom:8px}
-.flex{display:flex}
-.justify-between{justify-content:space-between}
-.items-center{align-items:center}
-.gap-2{gap:8px}
-.gap-3{gap:12px}
-.gap-4{gap:16px}
+.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}
+.flex{display:flex}.justify-between{justify-content:space-between}.items-center{align-items:center}.gap-2{gap:8px}.gap-3{gap:12px}
 .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px}
-.stat-card{background:linear-gradient(135deg,#2d8c3c,#1a6b28);border-radius:20px;padding:16px;text-align:center;color:white}
-.stat-value{font-size:28px;font-weight:800}
-.stat-label{font-size:12px;opacity:0.9;margin-top:4px}
-.chart-container{background:white;border-radius:20px;padding:16px;margin-bottom:20px}
-.product-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
-.product-price{font-size:20px;font-weight:700;color:#2d8c3c}
+.stat-card{background:linear-gradient(145deg,#ffffff,#f8fbf8);border-radius:24px;padding:18px 12px;text-align:center;border:1px solid rgba(58,123,77,0.1)}
+.stat-value{font-size:32px;font-weight:800;color:#3a7b4d}
+.stat-label{font-size:12px;color:#8da38d;margin-top:6px}
+.product-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;border:1px solid #edf2ed}
+.product-price{font-size:20px;font-weight:700;color:#3a7b4d}
 .image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0f4f0}
+.image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f4f7f4}
 .image-thumb img{width:100%;height:100%;object-fit:cover}
-.hours-grid{display:grid;gap:8px;margin-top:12px}
-.hours-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e8ece8}
-.hours-day{font-weight:500;color:#1a2e1a;text-transform:capitalize}
-.hours-slider{margin:12px 0;display:flex;align-items:center;gap:12px}
-.hours-slider span{min-width:45px;color:#1a2e1a}
-.hours-slider input{flex:1}
-.hours-value{font-size:13px;color:#2d8c3c;font-weight:600}
-.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;padding:20px}
 .modal.show{display:flex}
-.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;position:relative}
-.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#1a2e1a}
-.modal-close{font-size:28px;cursor:pointer;color:#8ba88b;padding:8px;border-radius:50%}
-.modal-close:active{background:#f0f4f0}
-.hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
+.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#2c3e2c}
+.modal-close{font-size:28px;cursor:pointer;color:#9aae9a;padding:8px}
+.hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s;padding:60px 20px}
 .hamburger-menu.show{right:0}
-.close-hamburger{position:absolute;top:20px;right:20px;background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#2d8c3c;display:flex;align-items:center;justify-content:center}
-.close-hamburger:active{transform:scale(0.95);background:#e8f5e9}
-.menu-item{padding:16px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px;font-size:14px;transition:all 0.2s}
-.menu-item:active{background:#f0f4f0}
-.menu-divider{height:1px;background:#e8ece8;margin:12px 0}
-.loading{text-align:center;padding:40px;color:#8ba88b}
-.loading i{font-size:32px;margin-bottom:12px;display:block}
-.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#1a2e1a;color:white;padding:14px;border-radius:50px;text-align:center;z-index:1000;animation:fadeInUp 0.3s ease}
+.close-hamburger{position:absolute;top:20px;right:20px;background:#eff3ef;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#3a7b4d}
+.menu-item{padding:14px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;border-radius:16px;font-size:15px}
+.menu-item:active{background:#eff3ef}
+.menu-divider{height:1px;background:#edf2ed;margin:12px 0}
+.toast{position:fixed;bottom:90px;left:20px;right:20px;background:#2c3e2c;color:white;padding:14px 20px;border-radius:60px;text-align:center;z-index:1000;animation:fadeInUp 0.3s}
 @keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-.input{width:100%;padding:14px 16px;border:1.5px solid #e0e8e0;border-radius:14px;font-size:15px;margin-bottom:12px;background:#f8faf8}
-.input:focus{outline:none;border-color:#2d8c3c;background:white}
-.category-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:12px 0}
-.category-chip{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:40px;padding:10px;text-align:center;cursor:pointer;font-size:13px;transition:all 0.2s}
-.category-chip.selected{background:#2d8c3c;color:white;border-color:#2d8c3c}
-.product-images-container{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.input{width:100%;padding:14px 16px;border:1.5px solid #e3eae3;border-radius:16px;font-size:15px;margin-bottom:12px;background:#fefefe}
+.input:focus{outline:none;border-color:#3a7b4d}
+.product-images-container{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
 .image-preview{position:relative;width:80px;height:80px}
-.image-preview img{width:100%;height:100%;border-radius:8px;object-fit:cover}
-.remove-img{position:absolute;top:-8px;right:-8px;background:#e53935;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer}
-.map-container{height:280px;background:#e8ece8;border-radius:20px;margin:16px 0;border:1px solid #e0e8e0;position:relative;overflow:hidden}
-.location-badge{background:#f8faf8;border-radius:12px;padding:12px;margin:12px 0;display:flex;align-items:center;gap:12px;border:1px solid #e0e8e0}
-.location-badge i{color:#2d8c3c;font-size:18px}
-.location-text{flex:1;font-size:13px}
-.refresh-loc{background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;transition:all 0.2s}
-.refresh-loc:active{transform:scale(0.95);background:#e8f5e9}
-.confirm-loc{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:40px;cursor:pointer;margin-top:12px;transition:all 0.2s}
-.confirm-loc:active{transform:scale(0.95)}
-.stars{color:#ffb800;letter-spacing:2px}
-.post-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;transition:all 0.2s}
-.post-card:active{transform:scale(0.98)}
+.image-preview img{width:100%;height:100%;border-radius:12px;object-fit:cover;border:1px solid #edf2ed}
+.remove-img{position:absolute;top:-8px;right:-8px;background:#e57373;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer}
+.open-toggle{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#fafdfa;border-radius:30px;margin-bottom:20px;border:1px solid #e3eae3}
+.toggle-switch{position:relative;display:inline-block;width:52px;height:26px}
+.toggle-switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#d0dfd0;transition:0.3s;border-radius:26px}
+.slider:before{position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;background-color:white;border-radius:50%}
+input:checked+.slider{background-color:#3a7b4d}
+input:checked+.slider:before{transform:translateX(26px)}
+.open-status{display:inline-block;padding:5px 14px;border-radius:30px;font-size:12px;font-weight:600}
+.open-status.open{background:#e3f5e3;color:#3a7b4d}
+.open-status.closed{background:#ffe8e6;color:#e57373}
+.post-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;border:1px solid #edf2ed}
 .post-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.post-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2d8c3c,#1a6b28);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;object-fit:cover}
-.post-content{font-size:14px;color:#1a2e1a;margin-bottom:12px;line-height:1.5}
-.post-images{display:flex;gap:8px;margin-bottom:12px;overflow-x:auto}
-.post-image{width:100px;height:100px;border-radius:12px;object-fit:cover}
-.post-stats{display:flex;gap:16px;margin-top:8px;padding-top:8px;border-top:1px solid #e8ece8}
-.post-stats span{font-size:12px;color:#8ba88b}
-.heatmap-container{height:200px;background:#e8ece8;border-radius:16px;margin:16px 0;position:relative}
-.open-toggle{display:flex;align-items:center;justify-content:space-between;padding:12px;background:#f8faf8;border-radius:20px;margin-bottom:16px}
-.open-toggle label{font-weight:600;color:#1a2e1a}
-.open-toggle .toggle-switch{position:relative;display:inline-block;width:52px;height:26px}
-.open-toggle .toggle-switch input{opacity:0;width:0;height:0}
-.open-toggle .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#ccc;transition:0.3s;border-radius:26px}
-.open-toggle .slider:before{position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;background-color:white;transition:0.3s;border-radius:50%}
-.open-toggle input:checked+.slider{background-color:#2d8c3c}
-.open-toggle input:checked+.slider:before{transform:translateX(26px)}
-.open-status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
-.open-status.open{background:#e8f5e9;color:#2d8c3c}
-.open-status.closed{background:#ffebee;color:#e53935}
-.tutorial-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px}
-.tutorial-card{background:white;border-radius:32px;max-width:400px;width:100%;padding:28px;animation:slideUp 0.3s ease}
-@keyframes slideUp{from{transform:translateY(50px);opacity:0}to{transform:translateY(0);opacity:1}}
-.tutorial-step{text-align:center}
-.tutorial-step .icon{font-size:64px;margin-bottom:16px}
-.tutorial-step h3{font-size:24px;color:#1a2e1a;margin-bottom:8px}
-.tutorial-step p{color:#6b8c6b;font-size:14px;line-height:1.5;margin-bottom:20px}
-.tutorial-step .feature-list{text-align:left;background:#f8faf8;padding:16px;border-radius:20px;margin:16px 0}
-.tutorial-step .feature-list li{padding:8px 0;display:flex;align-items:center;gap:10px;font-size:13px;color:#1a2e1a}
-.tutorial-step .feature-list li i{width:24px;color:#2d8c3c}
-.tutorial-dots{display:flex;justify-content:center;gap:8px;margin:20px 0}
-.tutorial-dot{width:8px;height:8px;background:#e0e8e0;border-radius:50%;cursor:pointer;transition:all 0.3s}
-.tutorial-dot.active{background:#2d8c3c;width:24px;border-radius:12px}
-.business-logo{width:60px;height:60px;border-radius:50%;object-fit:cover;background:#f0f4f0}
-.upload-area{background:#f8faf8;border:2px dashed #c0d0c0;border-radius:16px;padding:20px;text-align:center;cursor:pointer;margin:12px 0;transition:all 0.2s}
-.upload-area:active{background:#f0f4f0}
-.upload-area i{font-size:28px;color:#2d8c3c;margin-bottom:8px;display:block}
-.confirm-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px}
+.post-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3a7b4d,#2e6640);display:flex;align-items:center;justify-content:center;color:white;font-size:20px}
+.post-stats{display:flex;gap:18px;margin-top:8px;padding-top:8px;border-top:1px solid #edf2ed}
+.post-stats span{font-size:12px;color:#9aae9a}
+.upload-area{background:#fafdfa;border:2px dashed #cde0cd;border-radius:20px;padding:20px;text-align:center;cursor:pointer;margin:12px 0}
+.upload-area i{font-size:32px;color:#3a7b4d;margin-bottom:10px;display:block}
+.confirm-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px}
 .confirm-content{background:white;border-radius:28px;max-width:320px;width:100%;padding:24px;text-align:center}
-.confirm-content h3{margin-bottom:12px;color:#1a2e1a}
-.confirm-content p{margin-bottom:20px;color:#6b8c6b}
-.confirm-buttons{display:flex;gap:12px}
-.confirm-buttons button{flex:1}
+.confirm-buttons{display:flex;gap:12px;margin-top:16px}
+.heatmap-container{height:180px;background:#eef2ee;border-radius:24px;margin:16px 0;display:flex;align-items:center;justify-content:center}
 </style>
 
 <div class="app-bar">
     <button class="back-btn" onclick="confirmLogout()"><i class="fas fa-sign-out-alt"></i></button>
-    <div class="app-bar-title">Vendor Dashboard</div>
+    <div class="app-bar-title">Lako Vendor</div>
     <button class="menu-btn" onclick="toggleMenu()"><i class="fas fa-bars"></i></button>
 </div>
 
@@ -3720,7 +4088,7 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 </div>
 
 <div class="bottom-nav">
-    <div class="nav-item active" onclick="showPage('dashboard')"><i class="fas fa-chart-line"></i><span>Stats</span></div>
+    <div class="nav-item active" onclick="showPage('dashboard')"><i class="fas fa-home"></i><span>Home</span></div>
     <div class="nav-item" onclick="showPage('products')"><i class="fas fa-utensils"></i><span>Menu</span></div>
     <div class="nav-item" onclick="showPage('reviews')"><i class="fas fa-star"></i><span>Reviews</span></div>
     <div class="nav-item" onclick="showPage('posts')"><i class="fas fa-newspaper"></i><span>Posts</span></div>
@@ -3730,161 +4098,47 @@ body{background:#f5faf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 
 <div class="content" id="content"></div>
 
-<!-- Tutorial Modal -->
-<div id="tutorialModal" class="tutorial-overlay" style="display:none">
-    <div class="tutorial-card">
-        <div id="tutorialContent"></div>
-    </div>
-</div>
-
-<!-- Product Modal -->
-<div class="modal" id="productModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3 id="modalTitle">Add Product</h3><span class="modal-close" onclick="closeProductModal()">&times;</span></div>
-        <div id="modalBody"></div>
-    </div>
-</div>
-
-<!-- Hours Modal -->
-<div class="modal" id="hoursModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Set Operating Hours</h3><span class="modal-close" onclick="closeHoursModal()">&times;</span></div>
-        <div id="hoursBody"></div>
-    </div>
-</div>
-
-<!-- Analytics Modal -->
-<div class="modal" id="analyticsModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Business Analytics</h3><span class="modal-close" onclick="closeAnalyticsModal()">&times;</span></div>
-        <div id="analyticsContent"></div>
-    </div>
-</div>
-
-<!-- Post Modal -->
-<div class="modal" id="postModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Create Post</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div>
-        <textarea id="postContent" class="input" placeholder="What's on your mind? Share news, promotions, or updates..." rows="4"></textarea>
-        <div class="upload-area" onclick="document.getElementById('postImages').click()">
-            <i class="fas fa-image"></i>
-            <div>Click to add photos (required)</div>
-            <div style="font-size:11px;margin-top:4px">JPG, PNG up to 5MB each</div>
-        </div>
-        <input type="file" id="postImages" multiple accept="image/*" style="display:none" onchange="previewPostImages(this)">
-        <div id="postImagePreview" class="product-images-container"></div>
-        <button class="btn" onclick="createPost()"><i class="fas fa-paper-plane"></i> Publish Post</button>
-    </div>
-</div>
-
-<!-- Location Modal -->
-<div class="modal" id="locationModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Update Business Location</h3><span class="modal-close" onclick="closeLocationModal()">&times;</span></div>
-        <div class="map-container" id="locationMap"></div>
-        <div class="location-badge"><i class="fas fa-location-dot"></i><div class="location-text" id="locationText">Drag the marker to pin your location</div></div>
-        <button class="confirm-loc" id="confirmLocBtn" onclick="saveNewLocation()"><i class="fas fa-check"></i> Confirm Location</button>
-    </div>
-</div>
-
-<!-- Logo Modal -->
-<div class="modal" id="logoModal">
-    <div class="modal-content">
-        <div class="modal-header"><h3>Update Business Logo</h3><span class="modal-close" onclick="closeLogoModal()">&times;</span></div>
-        <div class="upload-area" onclick="document.getElementById('logoInput').click()">
-            <i class="fas fa-image"></i>
-            <div>Click to upload new logo</div>
-            <div style="font-size:11px;margin-top:4px">JPG, PNG (recommended 500x500)</div>
-        </div>
-        <input type="file" id="logoInput" accept="image/*" style="display:none" onchange="updateLogo(this)">
-        <div id="logoPreview" class="text-center mt-3"></div>
-        <button class="btn-outline mt-3" onclick="removeLogo()"><i class="fas fa-trash"></i> Remove Logo</button>
-    </div>
-</div>
+<!-- Modals -->
+<div id="productModal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="modalTitle">Add Product</h3><span class="modal-close" onclick="closeProductModal()">&times;</span></div><div id="modalBody"></div></div></div>
+<div id="postModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Create Post</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div><textarea id="postContent" class="input" rows="4" placeholder="Share news, promotions, or updates..."></textarea><div class="upload-area" onclick="document.getElementById('postImages').click()"><i class="fas fa-image"></i><div>Add photos (required)</div></div><input type="file" id="postImages" multiple accept="image/*" style="display:none" onchange="previewPostImages(this)"><div id="postImagePreview" class="product-images-container"></div><button class="btn" onclick="createPost()">Publish Post</button></div></div>
+<div id="locationModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Update Location</h3><span class="modal-close" onclick="closeLocationModal()">&times;</span></div><div id="locationMap" style="height:280px;background:#eef2ee;border-radius:20px"></div><button class="btn mt-3" onclick="saveNewLocation()">Confirm Location</button></div></div>
+<div id="logoModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Update Logo</h3><span class="modal-close" onclick="closeLogoModal()">&times;</span></div><div class="upload-area" onclick="document.getElementById('logoInput').click()"><i class="fas fa-image"></i><div>Upload new logo</div></div><input type="file" id="logoInput" accept="image/*" style="display:none" onchange="updateLogo(this)"><div id="logoPreview"></div><button class="btn-outline mt-3" onclick="removeLogo()">Remove Logo</button></div></div>
+<div id="hoursModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Set Hours</h3><span class="modal-close" onclick="closeHoursModal()">&times;</span></div><div id="hoursBody"></div></div></div>
+<div id="analyticsModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Analytics</h3><span class="modal-close" onclick="closeAnalyticsModal()">&times;</span></div><div id="analyticsContent"></div></div></div>
+<div id="tutorialModal" class="tutorial-overlay" style="display:none"><div class="tutorial-card"><div id="tutorialContent"></div></div></div>
 
 <script>
 let sessionToken = localStorage.getItem('session_token');
-let vendorData = null, products = [], posts = [], locationMap = null, locationMarker = null;
-let salesChart = null, trafficChart = null;
+let vendorData = null, products = [], posts = [];
+let currentProductId = null, currentImages = [];
 let isOpen = false;
-let openStatusInterval = null;
 let vendorProfile = null;
 
 if (!sessionToken) window.location.href = '/auth';
 
-const CATEGORIES = ["Coffee","Pancit","Tusok Tusok","Contemporary Street food","Bread and Pastry","Lomi","Beverage","Sarisari Store","Karendirya","Traditional Desserts","Contemporary Desserts","Squidball","Siomai","Siopao","Taho","Balut and other poultry","Corn","Fruit shakes","Fruit Juice"];
-
-function showToast(msg){
-    let t=document.querySelector('.toast');
-    if(t)t.remove();
-    t=document.createElement('div');
-    t.className='toast';
-    t.innerHTML='<i class="fas fa-info-circle"></i> '+msg;
-    document.body.appendChild(t);
-    setTimeout(()=>t.remove(),3000);
-}
+function showToast(msg){ let t=document.querySelector('.toast'); if(t)t.remove(); t=document.createElement('div'); t.className='toast'; t.innerHTML='<i class="fas fa-info-circle"></i> '+msg; document.body.appendChild(t); setTimeout(()=>t.remove(),3000); }
 
 async function api(url, options = {}) {
-    const res = await fetch(url, {
-        ...options,
-        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken, ...options.headers }
-    });
-    if (res.status === 401) { 
-        localStorage.clear(); 
-        window.location.href = '/auth'; 
-        return null; 
-    }
+    const res = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken, ...options.headers } });
+    if (res.status === 401) { localStorage.clear(); window.location.href = '/auth'; return null; }
     return res.json();
 }
 
-async function loadData() {
-    const data = await api('/api/vendor/data');
-    if (data) { vendorData = data.vendor; products = data.products || []; posts = data.posts || []; }
+async function loadData() { 
+    const data = await api('/api/vendor/data'); 
+    if (data) { 
+        vendorData = data.vendor; 
+        products = data.products || []; 
+        posts = data.posts || [];
+        isOpen = vendorData?.is_open || false;
+    } 
 }
 
-async function loadVendorProfile() {
-    const data = await api('/api/vendor/profile');
-    if (data) { vendorProfile = data; }
-}
-
-function checkOpenStatus() {
-    if(!vendorData?.operating_hours) return;
-    const now = new Date();
-    const day = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][now.getDay()];
-    const currentHour = now.getHours();
-    const hours = vendorData.operating_hours[day];
-    
-    if(hours === 'closed') {
-        if(isOpen) updateOpenStatus(false);
-        return;
-    }
-    if(hours && hours !== 'closed') {
-        const [openH, closeH] = hours.split('-').map(t => parseInt(t));
-        const shouldBeOpen = currentHour >= openH && currentHour < closeH;
-        if(shouldBeOpen !== isOpen) updateOpenStatus(shouldBeOpen);
-    }
-}
-
-async function updateOpenStatus(status) {
-    isOpen = status;
-    await api('/api/vendor/update-open-status', { method: 'POST', body: JSON.stringify({ is_open: status }) });
-    const statusEl = document.getElementById('openStatusDisplay');
-    if(statusEl) {
-        statusEl.innerHTML = status ? '<span class="open-status open"><i class="fas fa-check-circle"></i> Open Now</span>' : '<span class="open-status closed"><i class="fas fa-clock"></i> Closed</span>';
-    }
-    showToast(status ? 'Your shop is now OPEN! Customers can find you.' : 'Your shop is now CLOSED. Location sharing stopped.');
-}
-
-async function toggleOpenStatus() {
-    const newStatus = !isOpen;
-    await updateOpenStatus(newStatus);
-}
+async function loadVendorProfile() { const data = await api('/api/vendor/profile'); if (data) vendorProfile = data; }
 
 function showPage(p) {
-    document.querySelectorAll('.nav-item').forEach((el, i) => {
-        const pages = ['dashboard', 'products', 'reviews', 'posts', 'profile', 'settings'];
-        el.classList.toggle('active', pages[i] === p);
-    });
+    const pages = ['dashboard', 'products', 'reviews', 'posts', 'profile', 'settings'];
+    document.querySelectorAll('.nav-item').forEach((el, i) => el.classList.toggle('active', pages[i] === p));
     if (p === 'dashboard') showDashboard();
     else if (p === 'products') showProducts();
     else if (p === 'reviews') showReviews();
@@ -3894,202 +4148,133 @@ function showPage(p) {
 }
 
 async function showDashboard() {
-    document.getElementById('content').innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
-    await loadData();
-    await loadVendorProfile();
-    
+    document.getElementById('content').innerHTML = '<div class="text-center mt-5"><i class="fas fa-spinner fa-pulse fa-2x"></i></div>';
+    await loadData(); await loadVendorProfile();
     const analytics = await api('/api/vendor/analytics');
-    isOpen = vendorData?.is_open || false;
     const logoUrl = vendorData?.logo || null;
-    
     document.getElementById('content').innerHTML = `
-        <div class="card" style="background:linear-gradient(135deg,#2d8c3c,#1a6b28);color:white">
+        <div class="card" style="background:linear-gradient(135deg,#3a7b4d,#2e6640);color:white">
             <div class="flex justify-between items-center">
                 <div class="flex items-center gap-3">
-                    ${logoUrl ? `<img src="${logoUrl}" class="business-logo" style="width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid white">` : `<div class="business-logo" style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:28px"><i class="fas fa-store"></i></div>`}
-                    <div>
-                        <p style="opacity:0.9;font-size:13px">Welcome back,</p>
-                        <h2 style="font-size:22px">${vendorProfile?.user_name || vendorData?.user_name || 'Vendor'}!</h2>
-                        <p style="opacity:0.9;margin-top:2px;font-size:13px">${vendorData?.business_name}</p>
-                    </div>
+                    ${logoUrl ? `<img src="${logoUrl}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid white">` : `<div style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center"><i class="fas fa-store fa-2x"></i></div>`}
+                    <div><p style="opacity:0.9;font-size:13px">Welcome,</p><h2 style="font-size:22px">${vendorProfile?.user_name || vendorData?.user_name || 'Vendor'}!</h2><p style="opacity:0.85;font-size:12px">${vendorData?.business_name}</p></div>
                 </div>
                 <button class="btn-outline btn-sm" style="background:rgba(255,255,255,0.2);border:none;color:white" onclick="openLogoModal()"><i class="fas fa-edit"></i></button>
             </div>
         </div>
-        
-        <div class="open-toggle">
-            <div>
-                <label><i class="fas fa-store"></i> Shop Status</label>
-                <div id="openStatusDisplay" class="mt-1">${isOpen ? '<span class="open-status open"><i class="fas fa-check-circle"></i> Open Now</span>' : '<span class="open-status closed"><i class="fas fa-clock"></i> Closed</span>'}</div>
-            </div>
-            <label class="toggle-switch">
-                <input type="checkbox" id="openToggle" ${isOpen ? 'checked' : ''} onchange="toggleOpenStatus()">
-                <span class="slider"></span>
-            </label>
-        </div>
-        
-        <div class="stats-grid">
-            <div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div>
-            <div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div>
-            <div class="stat-card"><div class="stat-value">${analytics?.total_saves || 0}</div><div class="stat-label">Saved by Customers</div></div>
-            <div class="stat-card"><div class="stat-value">${analytics?.total_likes || 0}</div><div class="stat-label">Post Likes</div></div>
-        </div>
-        
-        <div class="card">
-            <h3><i class="fas fa-chart-line"></i> Foot Traffic (Past 7 Days)</h3>
-            <div class="chart-container" style="padding:0;margin-top:12px"><canvas id="trafficChart"></canvas></div>
-        </div>
-        
-        <div class="card">
-            <h3><i class="fas fa-chart-bar"></i> Engagement Overview</h3>
-            <div class="stats-grid" style="margin-top:12px">
-                <div class="stat-card" style="background:#f0f4f0;color:#1a2e1a"><div class="stat-value" style="color:#2d8c3c">${analytics?.trend_score || 0}%</div><div class="stat-label">Trend Score</div></div>
-                <div class="stat-card" style="background:#f0f4f0;color:#1a2e1a"><div class="stat-value" style="color:#2d8c3c">${analytics?.post_engagement || 0}</div><div class="stat-label">Post Engagements</div></div>
-            </div>
-        </div>
-        
-        <div class="card">
-            <h3><i class="fas fa-chart-line"></i> Peak Hours</h3>
-            <div id="peakHoursChart" style="height:200px"></div>
-            ${analytics?.suggested_hours ? `<div class="mt-3 text-secondary" style="background:#f8faf5;padding:12px;border-radius:12px"><i class="fas fa-lightbulb"></i> Suggestion: Based on traffic data, consider operating ${analytics.suggested_hours}</div>` : ''}
-        </div>
-        
-        <div class="card">
-            <h3><i class="fas fa-map-marked-alt"></i> Customer Heatmap</h3>
-            <div class="heatmap-container" id="heatmapContainer"></div>
-            <p class="text-secondary mt-2"><i class="fas fa-info-circle"></i> Shows where customers are when they view your page</p>
-        </div>
+        <div class="open-toggle"><div><label>Shop Status</label><div id="openStatusDisplay" class="mt-1">${isOpen ? '<span class="open-status open"> Open Now</span>' : '<span class="open-status closed"> Closed</span>'}</div></div><label class="toggle-switch"><input type="checkbox" id="openToggle" ${isOpen ? 'checked' : ''} onchange="toggleOpenStatus()"><span class="slider"></span></label></div>
+        <div class="stats-grid"><div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div><div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div><div class="stat-card"><div class="stat-value">${analytics?.total_saves || 0}</div><div class="stat-label">Saves</div></div><div class="stat-card"><div class="stat-value">${analytics?.total_likes || 0}</div><div class="stat-label">Likes</div></div></div>
+        <div class="card"><h3>Foot Traffic</h3><canvas id="trafficChart" style="height:160px"></canvas></div>
+        <div class="heatmap-container"><i class="fas fa-map-marker-alt" style="font-size:36px;color:#3a7b4d;opacity:0.3"></i><span class="text-secondary ml-2">Heatmap based on customer GPS</span></div>
     `;
-    
     setTimeout(() => {
-        if (trafficChart) trafficChart.destroy();
-        trafficChart = new Chart(document.getElementById('trafficChart'), {
-            type: 'line',
-            data: { labels: analytics?.weekly_labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{ label: 'Visitors', data: analytics?.weekly_traffic || [5,8,12,15,20,25,18], borderColor: '#2d8c3c', backgroundColor: 'rgba(45,140,60,0.1)', fill: true, tension: 0.4 }] },
-            options: { responsive: true, maintainAspectRatio: true }
-        });
-        
-        if(analytics?.peak_hours){
-            const peakData = analytics.peak_hours;
-            new Chart(document.getElementById('peakHoursChart'), {
-                type: 'bar',
-                data: { labels: Object.keys(peakData), datasets: [{ label: 'Visitors', data: Object.values(peakData), backgroundColor: '#2d8c3c', borderRadius: 8 }] },
-                options: { responsive: true, maintainAspectRatio: true }
-            });
-        }
-        
-        if(document.getElementById('heatmapContainer')){
-            const heatDiv = document.getElementById('heatmapContainer');
-            heatDiv.style.background = '#e8ece8';
-            heatDiv.style.display = 'flex';
-            heatDiv.style.alignItems = 'center';
-            heatDiv.style.justifyContent = 'center';
-            heatDiv.innerHTML = '<i class="fas fa-map-marker-alt" style="font-size:48px;color:#2d8c3c;opacity:0.5"></i><p class="text-secondary" style="margin-left:10px">Heatmap based on customer GPS data</p>';
-        }
+        new Chart(document.getElementById('trafficChart'), { type: 'line', data: { labels: analytics?.weekly_labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{ label: 'Visitors', data: analytics?.weekly_traffic || [5,8,12,15,20,25,18], borderColor: '#3a7b4d', backgroundColor: 'rgba(58,123,77,0.05)', fill: true, tension: 0.3 }] } });
     }, 100);
-    
-    if(openStatusInterval) clearInterval(openStatusInterval);
-    openStatusInterval = setInterval(checkOpenStatus, 60000);
-    checkOpenStatus();
 }
 
+async function toggleOpenStatus() { isOpen = !isOpen; await api('/api/vendor/update-open-status', { method: 'POST', body: JSON.stringify({ is_open: isOpen }) }); showDashboard(); showToast(isOpen ? 'Shop is OPEN' : 'Shop is CLOSED'); }
+
+// ==================== PRODUCTS WITH IMAGE SUPPORT ====================
 async function showProducts() {
     await loadData();
-    document.getElementById('content').innerHTML = `
-        <button class="btn" onclick="openAddProductModal()"><i class="fas fa-plus"></i> Add Product</button>
-        <div id="productsList" class="mt-4">${products.map(p => `
-            <div class="product-card">
-                <div class="flex justify-between"><div><h4><i class="fas fa-utensils"></i> ${p.name}</h4><p class="text-secondary">${p.description || ''}</p><div class="flex gap-2 mt-1"><span class="badge">${p.category}</span></div></div><div class="product-price">₱${p.price}</div></div>
-                ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail}"></div>`).join('')}</div>` : ''}
-                <div class="flex gap-2 mt-3"><button class="btn-outline btn-sm" onclick="openEditProductModal('${p.id}')"><i class="fas fa-edit"></i> Edit</button><button class="btn-outline btn-sm" onclick="deleteProduct('${p.id}')"><i class="fas fa-trash"></i> Delete</button></div>
-            </div>
-        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-info-circle"></i> No products yet. Click "Add Product" to get started!</div>'}</div>`;
+    document.getElementById('content').innerHTML = `<button class="btn" onclick="openAddProductModal()"><i class="fas fa-plus-circle"></i> Add Product</button><div id="productsList" class="mt-4">${products.map(p => `
+        <div class="product-card">
+            <div class="flex justify-between"><div><h4>${escapeHtml(p.name)}</h4><p class="text-secondary">${escapeHtml(p.description || '')}</p><span class="badge">${escapeHtml(p.category || 'Uncategorized')}</span></div><div class="product-price">₱${p.price}</div></div>
+            ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail || img}" onerror="this.src='https://placehold.co/200x200/f0f4f0/8da38d?text=No+Image'"></div>`).join('')}</div>` : ''}
+            <div class="flex gap-2 mt-3"><button class="btn-outline btn-sm" onclick="openEditProductModal('${p.id}')"><i class="fas fa-edit"></i> Edit</button><button class="btn-outline btn-sm" onclick="deleteProduct('${p.id}')"><i class="fas fa-trash"></i> Delete</button></div>
+        </div>
+    `).join('') || '<div class="card text-center">No products yet. Click "Add Product" to get started!</div>'}</div>`;
 }
 
-let currentProductId = null, currentImages = [];
+function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, function(m) { if(m === '&') return '&amp;'; if(m === '<') return '&lt;'; if(m === '>') return '&gt;'; return m; }); }
 
-function openAddProductModal() {
-    currentProductId = null;
-    currentImages = [];
-    document.getElementById('modalTitle').innerText = 'Add Product';
+function openAddProductModal() { 
+    currentProductId = null; 
+    currentImages = []; 
+    renderProductModal(); 
+}
+
+async function openEditProductModal(id) { 
+    await loadData();
+    const p = products.find(x => x.id == id); 
+    if(p) { 
+        currentProductId = id; 
+        currentImages = p.images ? [...p.images] : []; 
+        renderProductModal(p); 
+    } 
+}
+
+function renderProductModal(ex = null) {
+    const nameValue = ex ? ex.name.replace(/"/g, '&quot;') : '';
+    const descValue = ex ? (ex.description || '') : '';
+    const categoryValue = ex ? (ex.category || '') : '';
+    const priceValue = ex ? ex.price : '';
+    
+    document.getElementById('modalTitle').innerHTML = ex ? 'Edit Product' : 'Add Product';
     document.getElementById('modalBody').innerHTML = `
-        <input type="text" id="prodName" class="input" placeholder="Product name *">
-        <textarea id="prodDesc" class="input" placeholder="Description" rows="3"></textarea>
-        <select id="prodCategory" class="input">${CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select>
-        <div class="flex gap-2">
-            <input type="number" id="prodPrice" class="input" placeholder="Price (₱) *" step="0.01">
+        <input id="prodName" class="input" placeholder="Product name *" value="${nameValue}">
+        <textarea id="prodDesc" class="input" placeholder="Description" rows="3">${descValue}</textarea>
+        <input id="prodCategory" class="input" placeholder="Category (e.g., Pancit, Siomai, Coffee)" value="${escapeHtml(categoryValue)}">
+        <input id="prodPrice" type="number" class="input" placeholder="Price (₱) *" step="0.01" value="${priceValue}">
+        
+        <div style="margin:12px 0">
+            <label class="text-secondary" style="font-size:13px">Product Photos (PNG, JPG, JPEG)</label>
+            <div class="upload-area" onclick="document.getElementById('prodImages').click()" style="margin-top:8px">
+                <i class="fas fa-camera"></i>
+                <div>Click to upload photos</div>
+                <div style="font-size:11px">PNG, JPG, JPEG up to 5MB each</div>
+            </div>
+            <input type="file" id="prodImages" multiple accept="image/png,image/jpeg,image/jpg" style="display:none" onchange="previewImages(this)">
+            <div id="imagePreview" class="product-images-container"></div>
         </div>
-        <div class="flex items-center gap-2" style="margin: 12px 0;">
-            <button type="button" class="btn-outline btn-sm" id="choosePhotosBtn"><i class="fas fa-image"></i> Choose Photos</button>
-            <span class="text-secondary" id="fileCount">No files chosen</span>
-        </div>
-        <input type="file" id="prodImages" multiple accept="image/*" style="position: absolute; left: -9999px;">
-        <div id="imagePreview" class="product-images-container"></div>
+        
         <div class="flex gap-2 mt-4">
-            <button class="btn" onclick="saveProduct()">Save Product</button>
+            <button class="btn" onclick="saveProduct()"><i class="fas fa-save"></i> Save Product</button>
             <button class="btn-outline" onclick="closeProductModal()">Cancel</button>
         </div>
     `;
-    document.getElementById('productModal').classList.add('show');
     
-    setTimeout(() => {
-        const chooseBtn = document.getElementById('choosePhotosBtn');
-        const fileInput = document.getElementById('prodImages');
-        if (chooseBtn && fileInput) {
-            chooseBtn.onclick = function(e) {
-                e.preventDefault();
-                fileInput.click();
-            };
-            fileInput.onchange = function() { previewImages(this); };
-        }
-    }, 100);
-}
-
-async function openEditProductModal(productId) {
-    const product = products.find(p => p.id === productId);
-    if (!product) return;
-    currentProductId = productId;
-    currentImages = product.images || [];
-    document.getElementById('modalTitle').innerText = 'Edit Product';
-    document.getElementById('modalBody').innerHTML = `
-        <input type="text" id="prodName" class="input" placeholder="Product name *" value="${product.name.replace(/"/g, '&quot;')}">
-        <textarea id="prodDesc" class="input" placeholder="Description" rows="3">${product.description || ''}</textarea>
-        <select id="prodCategory" class="input">${CATEGORIES.map(c => `<option ${product.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
-        <div class="flex gap-2"><input type="number" id="prodPrice" class="input" placeholder="Price (₱) *" step="0.01" value="${product.price}"></div>
-        <div class="flex items-center gap-2" style="margin: 12px 0;"><button type="button" class="btn-outline btn-sm" id="choosePhotosBtn"><i class="fas fa-image"></i> Add Photos</button><span class="text-secondary" id="fileCount">Select new photos</span></div>
-        <input type="file" id="prodImages" multiple accept="image/*" style="position: absolute; left: -9999px;">
-        <div id="imagePreview" class="product-images-container"></div>
-        <div class="flex gap-2 mt-4"><button class="btn" onclick="saveProduct()"><i class="fas fa-save"></i> Update Product</button><button class="btn-outline" onclick="closeProductModal()">Cancel</button></div>
-    `;
+    // Display existing images
     const previewDiv = document.getElementById('imagePreview');
-    currentImages.forEach((img, idx) => {
-        previewDiv.innerHTML += `<div class="image-preview"><img src="${img.thumbnail}"><div class="remove-img" onclick="removeImage(${idx})">✖</div></div>`;
-    });
+    if (previewDiv) {
+        previewDiv.innerHTML = '';
+        if (currentImages.length > 0) {
+            currentImages.forEach((img, idx) => {
+                const imgUrl = typeof img === 'string' ? img : (img.thumbnail || img.full || img);
+                previewDiv.innerHTML += `<div class="image-preview"><img src="${imgUrl}" onerror="this.src='https://placehold.co/200x200/f0f4f0/8da38d?text=Bad+Image'"><div class="remove-img" onclick="removeImage(${idx})">✖</div></div>`;
+            });
+        }
+    }
+    
     document.getElementById('productModal').classList.add('show');
     
     setTimeout(() => {
-        const chooseBtn = document.getElementById('choosePhotosBtn');
-        const fileInput = document.getElementById('prodImages');
-        if (chooseBtn && fileInput) {
-            chooseBtn.onclick = function(e) {
-                e.preventDefault();
-                fileInput.click();
-            };
-            fileInput.onchange = function() { previewImages(this); };
+        const chooseBtn = document.getElementById('prodImages');
+        if (chooseBtn) {
+            chooseBtn.onchange = () => previewImages(chooseBtn);
         }
     }, 100);
 }
 
 function previewImages(input) {
     const previewDiv = document.getElementById('imagePreview');
-    const fileCount = document.getElementById('fileCount');
-    
-    if (fileCount) {
-        fileCount.innerText = `${input.files.length} new file(s) selected`;
-    }
+    if (!previewDiv) return;
     
     for (let i = 0; i < input.files.length; i++) {
         const file = input.files[i];
+        
+        // Validate file type
+        if (!file.type.match('image.*')) {
+            showToast('Please select an image file (PNG, JPG, JPEG)');
+            continue;
+        }
+        
+        // Validate file size (max 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            showToast('File too large. Max 5MB');
+            continue;
+        }
+        
         const reader = new FileReader();
         reader.onload = function(e) {
             previewDiv.innerHTML += `
@@ -4101,40 +4286,63 @@ function previewImages(input) {
         };
         reader.readAsDataURL(file);
     }
+    // Clear the input to allow re-uploading same files
+    input.value = '';
 }
 
-function removeImage(index) { currentImages.splice(index, 1); document.getElementById('imagePreview').children[index]?.remove(); }
+function removeImage(index) {
+    currentImages.splice(index, 1);
+    const previewDiv = document.getElementById('imagePreview');
+    if (previewDiv && previewDiv.children[index]) {
+        previewDiv.children[index].remove();
+    }
+}
 
 async function saveProduct() {
-    const name = document.getElementById('prodName').value;
+    const name = document.getElementById('prodName').value.trim();
+    const category = document.getElementById('prodCategory').value.trim();
     const price = parseFloat(document.getElementById('prodPrice').value);
     
-    if (!name || !price) {
-        showToast('Name and price are required!');
+    if (!name || isNaN(price) || price <= 0) {
+        showToast('Product name and valid price are required');
         return;
     }
     
-    const images = [];
-    const fileInput = document.getElementById('prodImages');
-    
-    for (let i = 0; i < fileInput.files.length; i++) {
-        const file = fileInput.files[i];
-        const reader = new FileReader();
-        const imgData = await new Promise((resolve) => {
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsDataURL(file);
-        });
-        images.push(imgData);
+    if (!category) {
+        showToast('Please enter a category');
+        return;
     }
+    
+    // Collect images from preview (new ones added)
+    const newImages = [];
+    const previewDiv = document.getElementById('imagePreview');
+    if (previewDiv) {
+        const previewImgs = previewDiv.querySelectorAll('.image-preview img');
+        for (let i = 0; i < previewImgs.length; i++) {
+            const src = previewImgs[i].src;
+            // If it's a data URL (new upload) or existing image URL
+            if (src && src.startsWith('data:image')) {
+                newImages.push({ thumbnail: src, full: src });
+            } else if (src && !src.startsWith('data:image')) {
+                // This is an existing image from server, preserve it
+                newImages.push({ thumbnail: src, full: src });
+            }
+        }
+    }
+    
+    // Also include any existing images that weren't removed
+    // We need to track which existing images are still in the preview
+    // For simplicity, we'll use newImages as the final list
     
     const productData = {
         name: name,
-        description: document.getElementById('prodDesc').value,
-        category: document.getElementById('prodCategory').value,
+        description: document.getElementById('prodDesc').value || '',
+        category: category,
         price: price,
-        stock: 0,
-        images: images
+        images: newImages.length > 0 ? newImages : currentImages
     };
+    
+    console.log('Saving product:', productData);
     
     const endpoint = currentProductId ? '/api/vendor/product/update' : '/api/vendor/product/create';
     const body = currentProductId ? { product_id: currentProductId, ...productData } : productData;
@@ -4142,31 +4350,35 @@ async function saveProduct() {
     const res = await api(endpoint, { method: 'POST', body: JSON.stringify(body) });
     
     if (res && res.success) {
-        showToast(currentProductId ? 'Product updated!' : 'Product created!');
+        showToast(currentProductId ? 'Product updated successfully!' : 'Product created successfully!');
         closeProductModal();
-        showProducts();
+        await showProducts();
     } else {
-        showToast('Failed to save product');
+        showToast('Failed to save product. Please try again.');
+        console.error('Save error:', res);
     }
 }
 
-async function deleteProduct(productId) {
+async function deleteProduct(id) {
     if (confirm('Delete this product permanently?')) {
-        const res = await api('/api/vendor/product/delete', { method: 'POST', body: JSON.stringify({ product_id: productId }) });
+        const res = await api('/api/vendor/product/delete', { method: 'POST', body: JSON.stringify({ product_id: id }) });
         if (res && res.success) { showToast('Product deleted'); showProducts(); }
+        else showToast('Failed to delete product');
     }
 }
 
+// ==================== REVIEWS ====================
 async function showReviews() {
     const data = await api('/api/vendor/reviews');
     document.getElementById('content').innerHTML = (data?.reviews || []).map(r => `
         <div class="card">
-            <div class="flex justify-between items-center"><div><strong><i class="fas fa-user-circle"></i> ${r.customer_name}</strong><div class="stars mt-1">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div></div><span class="text-secondary"><i class="far fa-calendar-alt"></i> ${new Date(r.created_at).toLocaleDateString()}</span></div>
-            <p class="mt-2">${r.comment || 'No comment provided'}</p>
+            <div class="flex justify-between items-center"><div><strong><i class="fas fa-user-circle"></i> ${escapeHtml(r.customer_name)}</strong><div class="stars mt-1">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div></div><span class="text-secondary">${new Date(r.created_at).toLocaleDateString()}</span></div>
+            <p class="mt-2">${escapeHtml(r.comment || 'No comment provided')}</p>
         </div>
-    `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-star"></i> No reviews yet.</div>';
+    `).join('') || '<div class="card text-center">No reviews yet.</div>';
 }
 
+// ==================== POSTS ====================
 async function showPosts() {
     await loadData();
     const feed = await api('/api/vendor/posts');
@@ -4176,49 +4388,44 @@ async function showPosts() {
             <div class="post-card">
                 <div class="post-header">
                     ${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:48px;height:48px;border-radius:50%;object-fit:cover">` : `<div class="post-avatar"><i class="fas fa-store"></i></div>`}
-                    <div><strong>${vendorData?.business_name}</strong><br><span class="text-secondary">${new Date(p.created_at).toLocaleDateString()}</span></div>
+                    <div><strong>${escapeHtml(vendorData?.business_name || 'Store')}</strong><br><span class="text-secondary">${new Date(p.created_at).toLocaleDateString()}</span></div>
                 </div>
-                <div class="post-content">${p.content}</div>
-                ${p.images && p.images.length ? `<div class="post-images">${p.images.slice(0,3).map(img => `<img src="${img.thumbnail}" class="post-image">`).join('')}</div>` : ''}
-                <div class="post-stats">
-                    <span><i class="far fa-heart"></i> ${p.likes || 0} likes</span>
-                    <span><i class="far fa-comment"></i> ${p.comment_count || 0} comments</span>
-                    <span><i class="far fa-bookmark"></i> ${p.saves || 0} saves</span>
-                </div>
+                <div class="post-content">${escapeHtml(p.content)}</div>
+                ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail || img}"></div>`).join('')}</div>` : ''}
+                <div class="post-stats"><span><i class="far fa-heart"></i> ${p.likes || 0}</span><span><i class="far fa-comment"></i> ${p.comment_count || 0}</span><span><i class="far fa-bookmark"></i> ${p.saves || 0}</span></div>
                 <div class="flex gap-2 mt-3"><button class="btn-outline btn-sm" onclick="deletePost('${p.id}')"><i class="fas fa-trash"></i> Delete</button></div>
             </div>
-        `).join('') || '<div class="card text-center text-secondary"><i class="fas fa-newspaper"></i> No posts yet. Create your first post to engage customers!</div>'}</div>`;
+        `).join('') || '<div class="card text-center">No posts yet. Create your first post!</div>'}</div>`;
 }
 
 function previewPostImages(input) {
-    const previewDiv = document.getElementById('postImagePreview');
-    previewDiv.innerHTML = '';
-    for (let i = 0; i < input.files.length; i++) {
-        const file = input.files[i];
+    const preview = document.getElementById('postImagePreview');
+    preview.innerHTML = '';
+    for (let f of input.files) {
+        if (!f.type.match('image.*')) continue;
+        if (f.size > 5 * 1024 * 1024) { showToast('File too large'); continue; }
         const reader = new FileReader();
-        reader.onload = function(e) {
-            previewDiv.innerHTML += `
-                <div class="image-preview">
-                    <img src="${e.target.result}">
-                    <div class="remove-img" onclick="this.parentElement.remove()">✖</div>
-                </div>
-            `;
+        reader.onload = (e) => {
+            preview.innerHTML += `<div class="image-preview"><img src="${e.target.result}"><div class="remove-img" onclick="this.parentElement.remove()">✖</div></div>`;
         };
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(f);
     }
 }
 
 async function createPost() {
-    const content = document.getElementById('postContent').value;
+    const content = document.getElementById('postContent').value.trim();
     const files = document.getElementById('postImages').files;
-    
     if (!content) { showToast('Please write something'); return; }
-    if (files.length === 0) { showToast('Please add at least 1 photo to your post'); return; }
+    if (files.length === 0) { showToast('Please add at least 1 photo'); return; }
     
     const images = [];
-    for (let file of files) {
-        const reader = new FileReader();
-        const imgData = await new Promise(resolve => { reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
+    for (let f of files) {
+        if (!f.type.match('image.*')) continue;
+        const imgData = await new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.readAsDataURL(f);
+        });
         images.push(imgData);
     }
     
@@ -4235,274 +4442,73 @@ async function createPost() {
     }
 }
 
-async function deletePost(postId) {
+async function deletePost(id) {
     if (confirm('Delete this post?')) {
-        await api('/api/vendor/post/delete', { method: 'POST', body: JSON.stringify({ post_id: postId }) });
+        await api('/api/vendor/post/delete', { method: 'POST', body: JSON.stringify({ post_id: id }) });
         showToast('Post deleted');
         showPosts();
     }
 }
 
+function openPostModal() {
+    document.getElementById('postModal').classList.add('show');
+    document.getElementById('postContent').value = '';
+    document.getElementById('postImages').value = '';
+    document.getElementById('postImagePreview').innerHTML = '';
+}
+
+// ==================== PROFILE & SETTINGS ====================
 async function showProfile() {
-    await loadVendorProfile();
+    await loadData(); await loadVendorProfile();
     document.getElementById('content').innerHTML = `
         <div class="card text-center">
-            <div class="business-logo" style="width:100px;height:100px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;font-size:48px">
-                ${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">` : `<i class="fas fa-store"></i>`}
-            </div>
-            <h2>${vendorData?.business_name}</h2>
-            <p class="text-secondary"><i class="fas fa-user"></i> ${vendorProfile?.user_name || vendorData?.user_name || 'Vendor'}</p>
-            <p class="text-secondary"><i class="fas fa-envelope"></i> ${vendorProfile?.email || vendorData?.email}</p>
-            <p class="text-secondary"><i class="fas fa-phone"></i> ${vendorProfile?.phone || vendorData?.phone || 'No phone'}</p>
-            <p class="text-secondary"><i class="fas fa-tag"></i> ${vendorData?.category}</p>
-            <div class="stats-grid mt-4">
-                <div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div>
-                <div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div>
-                <div class="stat-card"><div class="stat-value">${products.length}</div><div class="stat-label">Products</div></div>
-                <div class="stat-card"><div class="stat-value">${posts.length}</div><div class="stat-label">Posts</div></div>
-            </div>
-            <button class="btn-outline mt-3" onclick="showPage('settings')"><i class="fas fa-edit"></i> Edit Profile</button>
+            <div class="business-logo" style="width:100px;height:100px;margin:0 auto 16px;background:#eff3ef;border-radius:50%;display:flex;align-items:center;justify-content:center">${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">` : '<i class="fas fa-store fa-3x" style="color:#3a7b4d"></i>'}</div>
+            <h2>${escapeHtml(vendorData?.business_name || '')}</h2>
+            <p class="text-secondary">${vendorData?.email || ''}</p>
+            <div class="stats-grid mt-4"><div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div><div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div></div>
+            <button class="btn-outline mt-3" onclick="showPage('settings')">Edit Profile</button>
         </div>
     `;
 }
 
 async function showSettings() {
-    await loadData();
-    await loadVendorProfile();
+    await loadData(); await loadVendorProfile();
     const hours = vendorData?.operating_hours || {};
     document.getElementById('content').innerHTML = `
-        <div class="card">
-            <h3><i class="fas fa-clock"></i> Operating Hours</h3>
-            <div id="hoursPreview" class="hours-grid"></div>
-            <button class="btn-outline mt-3" onclick="openHoursModal()"><i class="fas fa-sliders-h"></i> Set Hours</button>
-        </div>
-        <div class="card">
-            <h3><i class="fas fa-map-marker-alt"></i> Business Location</h3>
-            <p class="text-secondary">Current: ${vendorData?.latitude || 'Not set'}, ${vendorData?.longitude || 'Not set'}</p>
-            <button class="btn-outline" onclick="openLocationModal()"><i class="fas fa-location-dot"></i> Update Location</button>
-        </div>
-        <div class="card">
-            <h3><i class="fas fa-image"></i> Business Logo</h3>
-            ${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:12px">` : '<p class="text-secondary">No logo uploaded</p>'}
-            <button class="btn-outline" onclick="openLogoModal()"><i class="fas fa-upload"></i> Update Logo</button>
-        </div>
-        <div class="card">
-            <h3><i class="fas fa-store"></i> Business Info</h3>
-            <p><strong>${vendorData?.business_name}</strong><br><i class="fas fa-tag"></i> ${vendorData?.category}<br><i class="fas fa-phone"></i> ${vendorProfile?.phone || vendorData?.phone || 'No phone'}<br><i class="fas fa-envelope"></i> ${vendorProfile?.email || vendorData?.email}</p>
-        </div>
+        <div class="card"><h3>Operating Hours</h3><div id="hoursPreview" class="hours-grid"></div><button class="btn-outline mt-3" onclick="openHoursModal()">Set Hours</button></div>
+        <div class="card"><h3>Business Location</h3><p class="text-secondary">Current: ${vendorData?.latitude || 'Not set'}, ${vendorData?.longitude || 'Not set'}</p><button class="btn-outline" onclick="openLocationModal()">Update Location</button></div>
+        <div class="card"><h3>Business Logo</h3>${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:12px">` : '<p class="text-secondary">No logo uploaded</p>'}<button class="btn-outline" onclick="openLogoModal()">Update Logo</button></div>
+        <div class="card"><h3>Business Info</h3><p><strong>${escapeHtml(vendorData?.business_name || '')}</strong><br><i class="fas fa-tag"></i> ${escapeHtml(vendorData?.category) || 'Not set'}<br><i class="fas fa-phone"></i> ${vendorProfile?.phone || vendorData?.phone || 'No phone'}<br><i class="fas fa-envelope"></i> ${vendorProfile?.email || vendorData?.email}</p></div>
     `;
-    
-    const previewDiv = document.getElementById('hoursPreview');
+    const preview = document.getElementById('hoursPreview');
     const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    previewDiv.innerHTML = days.map(day => `<div class="hours-item"><span class="hours-day">${day}</span><span>${hours[day] || 'closed'}</span></div>`).join('');
+    if (preview) preview.innerHTML = days.map(day => `<div class="hours-item"><span class="hours-day">${day}</span><span>${hours[day] || 'closed'}</span></div>`).join('');
 }
 
-function openLogoModal() {
-    document.getElementById('logoModal').classList.add('show');
-    if(vendorData?.logo){
-        document.getElementById('logoPreview').innerHTML = `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">`;
-    }
-}
-
-async function updateLogo(input) {
-    if(input.files && input.files[0]){
-        const file = input.files[0];
-        if(file.size > 5*1024*1024){ showToast('File too large. Max 5MB'); return; }
-        const reader = new FileReader();
-        reader.onload = async function(e){
-            const logoData = e.target.result;
-            const res = await api('/api/vendor/update-logo', { method: 'POST', body: JSON.stringify({ logo: logoData }) });
-            if(res && res.success){
-                showToast('Logo updated!');
-                closeLogoModal();
-                showSettings();
-                showDashboard();
-            } else {
-                showToast('Failed to update logo');
-            }
-        };
-        reader.readAsDataURL(file);
-    }
-}
-
-async function removeLogo() {
-    if(confirm('Remove your business logo?')){
-        const res = await api('/api/vendor/update-logo', { method: 'POST', body: JSON.stringify({ logo: null }) });
-        if(res && res.success){
-            showToast('Logo removed');
-            closeLogoModal();
-            showSettings();
-            showDashboard();
-        }
-    }
-}
-
-function openHoursModal() {
-    const hours = vendorData?.operating_hours || {};
-    document.getElementById('hoursBody').innerHTML = `<div id="hoursSliders"></div><button class="btn mt-4" onclick="saveHours()">Save Hours</button>`;
-    const slidersDiv = document.getElementById('hoursSliders');
-    const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    days.forEach(day => {
-        const current = hours[day] || 'closed';
-        const isClosed = current === 'closed';
-        const [openH = 9, closeH = 18] = current !== 'closed' ? current.split('-').map(t => parseInt(t)) : [9, 18];
-        slidersDiv.innerHTML += `
-            <div class="card"><div class="flex justify-between"><h4>${day}</h4><label><input type="checkbox" id="closed_${day}" ${isClosed ? 'checked' : ''} onchange="toggleDay('${day}')"> Closed</label></div>
-            <div id="sliders_${day}" ${isClosed ? 'style="display:none"' : ''}>
-                <div class="hours-slider"><span>Open</span><input type="range" id="open_${day}" min="0" max="23" value="${openH}" oninput="updateTime('open', '${day}', this.value)"><span id="open_val_${day}" class="hours-value">${openH}:00</span></div>
-                <div class="hours-slider"><span>Close</span><input type="range" id="close_${day}" min="0" max="23" value="${closeH}" oninput="updateTime('close', '${day}', this.value)"><span id="close_val_${day}" class="hours-value">${closeH}:00</span></div>
-            </div></div>`;
-    });
-    document.getElementById('hoursModal').classList.add('show');
-}
-
-function updateTime(type, day, value) { document.getElementById(`${type}_val_${day}`).innerText = `${value}:00`; }
-function toggleDay(day) { const isClosed = document.getElementById(`closed_${day}`).checked; document.getElementById(`sliders_${day}`).style.display = isClosed ? 'none' : 'block'; }
-
-async function saveHours() {
-    const hours = {};
-    const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    days.forEach(day => {
-        const isClosed = document.getElementById(`closed_${day}`)?.checked;
-        if (isClosed) hours[day] = 'closed';
-        else { const openH = document.getElementById(`open_${day}`)?.value || 9; const closeH = document.getElementById(`close_${day}`)?.value || 18; hours[day] = `${openH}:00-${closeH}:00`; }
-    });
-    const res = await api('/api/vendor/update-hours', { method: 'POST', body: JSON.stringify({ hours }) });
-    if (res && res.success) { showToast('Hours saved! Auto-status will update based on hours'); closeHoursModal(); showSettings(); checkOpenStatus(); }
-}
-
-function openLocationModal() {
-    document.getElementById('locationModal').classList.add('show');
-    setTimeout(() => {
-        if (typeof L !== 'undefined') {
-            if (locationMap) locationMap.remove();
-            locationMap = L.map('locationMap').setView([vendorData?.latitude || 14.5995, vendorData?.longitude || 120.9842], 16);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(locationMap);
-            locationMarker = L.marker([vendorData?.latitude || 14.5995, vendorData?.longitude || 120.9842], { draggable: true }).addTo(locationMap);
-            locationMarker.on('dragend', function(e) {
-                const pos = e.target.getLatLng();
-                document.getElementById('locationText').innerHTML = `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
-            });
-            document.getElementById('locationText').innerHTML = `${vendorData?.latitude || 'Tap to set'}, ${vendorData?.longitude || 'Tap to set'}`;
-        }
-    }, 100);
-}
-
-async function saveNewLocation() {
-    const pos = locationMarker.getLatLng();
-    const res = await api('/api/vendor/update-location', { method: 'POST', body: JSON.stringify({ latitude: pos.lat, longitude: pos.lng }) });
-    if (res && res.success) { showToast('Location updated!'); closeLocationModal(); showSettings(); }
-}
-
-async function showAnalytics() {
-    const data = await api('/api/vendor/analytics');
-    document.getElementById('analyticsContent').innerHTML = `
-        <div class="stats-grid">
-            <div class="stat-card"><div class="stat-value">${data.total_visits || 0}</div><div class="stat-label">Total Visits</div></div>
-            <div class="stat-card"><div class="stat-value">${data.avg_rating || 'N/A'}</div><div class="stat-label">Avg Rating</div></div>
-            <div class="stat-card"><div class="stat-value">${data.total_saves || 0}</div><div class="stat-label">Times Saved</div></div>
-            <div class="stat-card"><div class="stat-value">${data.total_likes || 0}</div><div class="stat-label">Post Likes</div></div>
-        </div>
-        <div class="chart-container"><canvas id="trafficAnalyticsChart"></canvas></div>
-        <div class="chart-container"><canvas id="weeklyChart"></canvas></div>
-        <div class="card"><h3>Peak Hours Analysis</h3><div id="peakDetail"></div></div>`;
-    document.getElementById('analyticsModal').classList.add('show');
-    setTimeout(() => {
-        new Chart(document.getElementById('trafficAnalyticsChart'), {
-            type: 'line',
-            data: { labels: data.weekly_labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{ label: 'Visitors', data: data.weekly_data || [5,8,12,15,20,25,18], borderColor: '#2d8c3c', fill: true }] }
-        });
-        new Chart(document.getElementById('weeklyChart'), {
-            type: 'bar',
-            data: { labels: ['Week 1','Week 2','Week 3','Week 4'], datasets: [{ label: 'Engagement', data: data.monthly_engagement || [100,150,200,180], backgroundColor: '#2d8c3c', borderRadius: 8 }] }
-        });
-        if(data.peak_hours){
-            document.getElementById('peakDetail').innerHTML = Object.entries(data.peak_hours).map(([hour, count]) => `<div class="flex justify-between"><span>${hour}:00</span><span>${count} visitors</span></div>`).join('');
-        }
-    }, 100);
-}
-
-function showTutorial() {
-    const steps = [
-        { icon: "<i class='fas fa-chart-line'></i>", title: "Welcome to Vendor Dashboard!", desc: "This is your command center where you can manage your entire business on Lako.", features: ["View your shop stats and ratings", "Track customer engagement", "Monitor foot traffic in real-time"] },
-        { icon: "<i class='fas fa-toggle-on'></i>", title: "Open/Close Toggle", desc: "Control when customers can see your location. When OPEN, customers can find you on the map.", features: ["Toggle ON during business hours", "Auto-updates based on your operating hours", "Location sharing only when OPEN"] },
-        { icon: "<i class='fas fa-utensils'></i>", title: "Manage Your Menu", desc: "Add, edit, and remove products from your menu with photos.", features: ["Add product name, price, description", "Upload multiple photos", "Organize by category"] },
-        { icon: "<i class='fas fa-newspaper'></i>", title: "Create Posts", desc: "Share updates, promotions, and engage with your customers.", features: ["Post text and photos (required)", "Customers can like and comment", "Track post engagement"] },
-        { icon: "<i class='fas fa-star'></i>", title: "Reviews & Ratings", desc: "See what customers are saying about your business.", features: ["Read customer reviews", "Respond to feedback", "Improve your rating"] },
-        { icon: "<i class='fas fa-sliders-h'></i>", title: "Settings", desc: "Configure your business hours, location, and logo.", features: ["Set operating hours with sliders", "Update your business location on map", "Upload your business logo", "Business will auto-open/close based on hours"] }
-    ];
-    
-    let stepIndex = 0;
-    const modal = document.getElementById('tutorialModal');
-    const content = document.getElementById('tutorialContent');
-    
-    function renderStep() {
-        const step = steps[stepIndex];
-        content.innerHTML = `
-            <div class="tutorial-step">
-                <div class="icon">${step.icon}</div>
-                <h3>${step.title}</h3>
-                <p>${step.desc}</p>
-                <div class="feature-list">
-                    ${step.features.map(f => `<li><i class="fas fa-check-circle"></i> ${f}</li>`).join('')}
-                </div>
-                <div class="tutorial-dots">
-                    ${steps.map((_, i) => `<div class="tutorial-dot ${i === stepIndex ? 'active' : ''}" onclick="goToStep(${i})"></div>`).join('')}
-                </div>
-                <div class="flex gap-2">
-                    ${stepIndex > 0 ? '<button class="btn-outline" onclick="prevStep()"><i class="fas fa-arrow-left"></i> Back</button>' : ''}
-                    <button class="btn" onclick="${stepIndex === steps.length - 1 ? 'closeTutorial()' : 'nextStep()'}">${stepIndex === steps.length - 1 ? '<i class="fas fa-check"></i> Get Started' : 'Next <i class="fas fa-arrow-right"></i>'}</button>
-                </div>
-            </div>
-        `;
-    }
-    
-    window.goToStep = (i) => { stepIndex = i; renderStep(); };
-    window.nextStep = () => { if(stepIndex < steps.length - 1) { stepIndex++; renderStep(); } };
-    window.prevStep = () => { if(stepIndex > 0) { stepIndex--; renderStep(); } };
-    window.closeTutorial = () => { modal.style.display = 'none'; localStorage.setItem('tutorial_seen', 'true'); };
-    
-    modal.style.display = 'flex';
-    renderStep();
-}
-
-function confirmLogout() {
-    const modal = document.createElement('div');
-    modal.className = 'confirm-modal';
-    modal.innerHTML = `
-        <div class="confirm-content">
-            <h3><i class="fas fa-sign-out-alt"></i> Logout</h3>
-            <p>Are you sure you want to logout?</p>
-            <div class="confirm-buttons">
-                <button class="btn-outline" onclick="this.closest('.confirm-modal').remove()">Cancel</button>
-                <button class="btn" onclick="logout()">Logout</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-}
-
-function closeProductModal() { document.getElementById('productModal').classList.remove('show'); }
-function closeHoursModal() { document.getElementById('hoursModal').classList.remove('show'); }
-function closeAnalyticsModal() { document.getElementById('analyticsModal').classList.remove('show'); }
-function closePostModal() { document.getElementById('postModal').classList.remove('show'); }
-function closeLocationModal() { document.getElementById('locationModal').classList.remove('show'); }
-function closeLogoModal() { document.getElementById('logoModal').classList.remove('show'); }
-function toggleMenu() { document.getElementById('hamburgerMenu').classList.toggle('show'); }
-function logout() { localStorage.clear(); window.location.href = '/'; }
+function openLogoModal() { document.getElementById('logoModal').classList.add('show'); if(vendorData?.logo) document.getElementById('logoPreview').innerHTML = `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">`; }
+async function updateLogo(input) { if(input.files[0]){ const file=input.files[0]; if(file.size>5*1024*1024){ showToast('File too large. Max 5MB'); return; } const r=new FileReader(); r.onload=async(e)=>{ const res=await api('/api/vendor/update-logo',{method:'POST',body:JSON.stringify({logo:e.target.result})}); if(res?.success){ showToast('Logo updated!'); closeLogoModal(); showSettings(); showDashboard(); } else showToast('Failed to update logo'); }; r.readAsDataURL(file); } }
+async function removeLogo(){ if(confirm('Remove your business logo?')){ const res=await api('/api/vendor/update-logo',{method:'POST',body:JSON.stringify({logo:null})}); if(res?.success){ showToast('Logo removed'); closeLogoModal(); showSettings(); showDashboard(); } } }
+function openHoursModal() { const hours=vendorData?.operating_hours||{}; const days=['monday','tuesday','wednesday','thursday','friday','saturday','sunday']; let html=''; days.forEach(day=>{ const val=hours[day]||'closed'; const closed=val==='closed'; let [openH=9,closeH=18]=val!=='closed'?val.split('-').map(parseInt):[9,18]; html+=`<div class="card"><div class="flex justify-between"><h4>${day}</h4><label><input type="checkbox" id="closed_${day}" ${closed?'checked':''} onchange="toggleDay('${day}')"> Closed</label></div><div id="sliders_${day}" ${closed?'style="display:none"':''}><div><span>Open</span><input type="range" id="open_${day}" min="0" max="23" value="${openH}" oninput="document.getElementById('open_val_${day}').innerText=this.value+':00'"><span id="open_val_${day}">${openH}:00</span></div><div><span>Close</span><input type="range" id="close_${day}" min="0" max="23" value="${closeH}" oninput="document.getElementById('close_val_${day}').innerText=this.value+':00'"><span id="close_val_${day}">${closeH}:00</span></div></div></div>`; }); document.getElementById('hoursBody').innerHTML=html+'<button class="btn mt-4" onclick="saveHours()">Save Hours</button>'; document.getElementById('hoursModal').classList.add('show'); window.toggleDay=(day)=>{ const closed=document.getElementById(`closed_${day}`).checked; document.getElementById(`sliders_${day}`).style.display=closed?'none':'block'; }; }
+function updateTime(type,day,value){ document.getElementById(`${type}_val_${day}`).innerText=`${value}:00`; }
+async function saveHours(){ const hours={}; const days=['monday','tuesday','wednesday','thursday','friday','saturday','sunday']; days.forEach(day=>{ const closed=document.getElementById(`closed_${day}`)?.checked; if(closed) hours[day]='closed'; else{ const openH=document.getElementById(`open_${day}`)?.value||9; const closeH=document.getElementById(`close_${day}`)?.value||18; hours[day]=`${openH}:00-${closeH}:00`; } }); const res=await api('/api/vendor/update-hours',{method:'POST',body:JSON.stringify({hours})}); if(res?.success){ showToast('Hours saved!'); closeHoursModal(); showSettings(); } }
+function openLocationModal(){ document.getElementById('locationModal').classList.add('show'); setTimeout(()=>{ if(typeof L!=='undefined'){ if(window.locationMap) window.locationMap.remove(); window.locationMap=L.map('locationMap').setView([vendorData?.latitude||14.5995,vendorData?.longitude||120.9842],16); L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(window.locationMap); window.locationMarker=L.marker([vendorData?.latitude||14.5995,vendorData?.longitude||120.9842],{draggable:true}).addTo(window.locationMap); window.locationMarker.on('dragend',e=>{ const pos=e.target.getLatLng(); document.getElementById('locationText').innerHTML=`${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`; }); document.getElementById('locationText').innerHTML=`${vendorData?.latitude||'Tap to set'}, ${vendorData?.longitude||'Tap to set'}`; } },100); }
+async function saveNewLocation(){ if(window.locationMarker){ const pos=window.locationMarker.getLatLng(); const res=await api('/api/vendor/update-location',{method:'POST',body:JSON.stringify({latitude:pos.lat,longitude:pos.lng})}); if(res?.success){ showToast('Location updated!'); closeLocationModal(); showSettings(); } } }
+async function showAnalytics(){ const data=await api('/api/vendor/analytics'); document.getElementById('analyticsContent').innerHTML=`<div class="stats-grid"><div class="stat-card"><div class="stat-value">${data.total_visits||0}</div><div class="stat-label">Visits</div></div><div class="stat-card"><div class="stat-value">${data.avg_rating||'N/A'}</div><div class="stat-label">Rating</div></div></div><canvas id="analyticsChart"></canvas>`; document.getElementById('analyticsModal').classList.add('show'); setTimeout(()=>{ new Chart(document.getElementById('analyticsChart'),{type:'bar',data:{labels:data.weekly_labels||['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],datasets:[{label:'Traffic',data:data.weekly_traffic||[5,8,12,15,20,25,18],backgroundColor:'#3a7b4d',borderRadius:8}]}}); },100); }
+function showTutorial() { alert("Vendor Dashboard Tutorial\\n\\n✓ Add products with photos (PNG, JPG, JPEG)\\n✓ Edit existing products\\n✓ Create posts to engage customers\\n✓ View customer reviews\\n✓ Toggle open/close status\\n✓ Set operating hours and location"); }
+function closeProductModal(){ document.getElementById('productModal').classList.remove('show'); }
+function closePostModal(){ document.getElementById('postModal').classList.remove('show'); }
+function closeLocationModal(){ document.getElementById('locationModal').classList.remove('show'); }
+function closeLogoModal(){ document.getElementById('logoModal').classList.remove('show'); }
+function closeHoursModal(){ document.getElementById('hoursModal').classList.remove('show'); }
+function closeAnalyticsModal(){ document.getElementById('analyticsModal').classList.remove('show'); }
+function toggleMenu(){ document.getElementById('hamburgerMenu').classList.toggle('show'); }
+function confirmLogout(){ if(confirm('Logout?')){ localStorage.clear(); window.location.href='/'; } }
 
 let fa=document.createElement('link');fa.rel='stylesheet';fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';document.head.appendChild(fa);
 let chartScript=document.createElement('script');chartScript.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';document.head.appendChild(chartScript);
 let leaflet=document.createElement('link');leaflet.rel='stylesheet';leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(leaflet);
 let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';document.head.appendChild(leafletScript);
-
-// Check for existing session on page load (no redirect)
-if(sessionToken) {
-    if(!localStorage.getItem('tutorial_seen')) setTimeout(showTutorial, 500);
-    showDashboard();
-} else {
-    window.location.href = '/auth';
-}
+if(sessionToken){ showDashboard(); } else window.location.href='/auth';
 </script>
 ''')
 # ============================================
@@ -5024,6 +5030,62 @@ def register_customer():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/customer/vendor/posts/<vendor_id>', methods=['GET'])
+def get_vendor_posts(vendor_id):
+    """Get all posts for a specific vendor to display in vendor modal"""
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Get vendor by ID
+    vendor_result = supabase.table('vendors').select('*').eq('id', vendor_id).execute()
+    if not vendor_result.data:
+        return jsonify({'error': 'Vendor not found'}), 404
+    
+    vendor = vendor_result.data[0]
+    
+    # Get posts for this vendor using user_id (since posts are tied to user_id, not vendor_id)
+    # Assuming vendor has a user_id foreign key
+    user_id = vendor.get('user_id')
+    
+    if not user_id:
+        # If no user_id, return empty posts
+        return jsonify({'posts': []})
+    
+    # Get posts by this vendor
+    posts_result = supabase.table('posts')\
+        .select('*')\
+        .eq('user_id', user_id)\
+        .order('created_at', desc=True)\
+        .execute()
+    
+    posts = []
+    for post in posts_result.data:
+        # Get images for each post
+        images_result = supabase.table('post_images')\
+            .select('*')\
+            .eq('post_id', post['id'])\
+            .execute() if 'post_images' in supabase.table_names() else []
+        
+        posts.append({
+            'id': post.get('id'),
+            'content': post.get('content', ''),
+            'images': post.get('images', []),  # If images stored directly in post
+            'likes': post.get('likes', 0),
+            'comment_count': post.get('comment_count', 0),
+            'saves': post.get('saves', 0),
+            'created_at': post.get('created_at')
+        })
+    
+    return jsonify({
+        'posts': posts,
+        'vendor': {
+            'id': vendor.get('id'),
+            'business_name': vendor.get('business_name'),
+            'category': vendor.get('category')
+        }
+    })
 
 @app.route('/api/auth/register/vendor', methods=['POST'])
 def register_vendor():
@@ -5597,51 +5659,56 @@ def get_nearby_vendors_api():
 # ============================================
 
 @app.route('/api/customer/feed', methods=['GET'])
-def get_customer_feed():
+def customer_feed():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session:
         return jsonify({'error': 'Unauthorized'}), 401
     
-    # Get posts
-    posts = supabase.table('posts').select('*').is_('parent_id', 'null').order('created_at', desc=True).limit(50).execute()
+    # Use the posts_with_users view to get author names
+    posts = supabase.table('posts_with_users').select('*').order('created_at', desc=True).execute()
     
-    # Get all unique user IDs
-    user_ids = list(set([p['user_id'] for p in (posts.data or []) if p.get('user_id')]))
+    # Get user's liked posts
+    user_likes = supabase.table('post_likes').select('post_id').eq('user_id', session['user_id']).execute()
+    liked_ids = [like['post_id'] for like in user_likes.data]
     
-    # Fetch users in batch
-    users = {}
-    if user_ids:
-        users_result = supabase.table('users').select('id, full_name').in_('id', user_ids).execute()
-        for u in (users_result.data or []):
-            users[u['id']] = u['full_name']
+    formatted_posts = []
+    for p in posts.data:
+        formatted_posts.append({
+            'id': p['id'],
+            'user_id': p['user_id'],
+            'author': p.get('author_name', 'User'),
+            'content': p['content'],
+            'images': p.get('images', []),
+            'likes': p.get('likes', 0),
+            'comment_count': p.get('comment_count', 0),
+            'user_liked': p['id'] in liked_ids,
+            'created_at': p['created_at']
+        })
     
-    result = []
-    for p in (posts.data or []):
-        p['author'] = users.get(p['user_id'], 'User') if p.get('user_id') else 'User'
-        
-        # Get like count
-        likes = supabase.table('post_likes').select('*', count='exact').eq('post_id', p['id']).execute()
-        p['likes'] = likes.count or 0
-        
-        # Get comment count
-        comments = supabase.table('posts').select('*', count='exact').eq('parent_id', p['id']).execute()
-        p['comment_count'] = comments.count or 0
-        
-        result.append(p)
-    
-    return jsonify({'posts': result})
+    return jsonify({'posts': formatted_posts})
+
 @app.route('/api/customer/post/create', methods=['POST'])
-def create_customer_post():
+def create_post():
     session = require_session(request.headers.get('X-Session-Token'))
     if not session:
         return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.json
-    post_id = create_post(session['user_id'], session['role'], data.get('content'), data.get('images', []))
+    post_id = str(uuid.uuid4())
     
-    if post_id:
-        return jsonify({'success': True, 'post_id': post_id})
-    return jsonify({'error': 'Failed to create post'}), 500
+    post_data = {
+        'id': post_id,
+        'user_id': session['user_id'],
+        'content': data.get('content'),
+        'images': data.get('images', []),
+        'likes': 0,
+        'comment_count': 0,
+        'created_at': datetime.now(timezone.utc).isoformat()
+    }
+    
+    supabase.table('posts').insert(post_data).execute()
+    
+    return jsonify({'success': True, 'post_id': post_id})
 
 @app.route('/api/customer/like', methods=['POST'])
 def like_post():
@@ -5652,21 +5719,113 @@ def like_post():
     data = request.json
     post_id = data.get('post_id')
     
+    # Check if already liked
     existing = supabase.table('post_likes').select('*').eq('post_id', post_id).eq('user_id', session['user_id']).execute()
     
     if existing.data:
+        # Unlike - remove the like
         supabase.table('post_likes').delete().eq('post_id', post_id).eq('user_id', session['user_id']).execute()
-        supabase.table('posts').update({'likes': supabase.raw('likes - 1')}).eq('id', post_id).execute()
         return jsonify({'success': True, 'liked': False})
     else:
+        # Like - add the like
+        like_id = str(uuid.uuid4())
         supabase.table('post_likes').insert({
-            'id': str(uuid.uuid4()),
+            'id': like_id,
             'post_id': post_id,
             'user_id': session['user_id'],
-            'created_at': utc_now()
+            'created_at': datetime.now(timezone.utc).isoformat()
         }).execute()
-        supabase.table('posts').update({'likes': supabase.raw('likes + 1')}).eq('id', post_id).execute()
         return jsonify({'success': True, 'liked': True})
+
+@app.route('/api/customer/user/profile/<user_id>', methods=['GET'])
+def get_user_profile(user_id):
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Get user info
+    user = supabase.table('users').select('id, full_name, email').eq('id', user_id).execute()
+    if not user.data:
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Get post count
+    posts = supabase.table('posts').select('id', count='exact').eq('user_id', user_id).execute()
+    post_count = posts.count if hasattr(posts, 'count') else len(posts.data)
+    
+    # Get follower count (users who follow this user)
+    followers = supabase.table('user_follows').select('id', count='exact').eq('following_id', user_id).execute()
+    follower_count = followers.count if hasattr(followers, 'count') else len(followers.data)
+    
+    # Get following count (users this user follows)
+    following = supabase.table('user_follows').select('id', count='exact').eq('follower_id', user_id).execute()
+    following_count = following.count if hasattr(following, 'count') else len(following.data)
+    
+    return jsonify({
+        'id': user.data[0]['id'],
+        'full_name': user.data[0].get('full_name', 'User'),
+        'email': user.data[0].get('email', ''),
+        'post_count': post_count,
+        'follower_count': follower_count,
+        'following_count': following_count
+    })
+
+@app.route('/api/customer/profile', methods=['GET'])
+def get_my_profile():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    user = supabase.table('users').select('id, full_name, email, phone').eq('id', session['user_id']).execute()
+    
+    if not user.data:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify({
+        'id': user.data[0]['id'],
+        'full_name': user.data[0].get('full_name', ''),
+        'email': user.data[0].get('email', ''),
+        'phone': user.data[0].get('phone', '')
+    })
+
+@app.route('/api/customer/update-profile', methods=['POST'])
+def update_profile():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    
+    update_data = {}
+    if 'full_name' in data:
+        update_data['full_name'] = data['full_name']
+    if 'phone' in data:
+        update_data['phone'] = data['phone']
+    
+    supabase.table('users').update(update_data).eq('id', session['user_id']).execute()
+    
+    return jsonify({'success': True})
+
+@app.route('/api/customer/post/comments/<post_id>', methods=['GET'])
+def get_post_comments(post_id):
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Use the comments_with_users view to get author names
+    comments = supabase.table('comments_with_users').select('*').eq('post_id', post_id).order('created_at', desc=False).execute()
+    
+    formatted_comments = []
+    for c in comments.data:
+        formatted_comments.append({
+            'id': c['id'],
+            'post_id': c['post_id'],
+            'user_id': c['user_id'],
+            'author': c.get('author_name', 'User'),
+            'content': c['content'],
+            'created_at': c['created_at']
+        })
+    
+    return jsonify({'comments': formatted_comments})
 
 @app.route('/api/customer/comment', methods=['POST'])
 def add_comment():
@@ -5679,22 +5838,37 @@ def add_comment():
     
     comment_data = {
         'id': comment_id,
-        'parent_id': data.get('post_id'),
+        'post_id': data.get('post_id'),
         'user_id': session['user_id'],
-        'user_role': 'customer',
         'content': data.get('comment'),
-        'images': [],
-        'likes': 0,
-        'comment_count': 0,
-        'created_at': utc_now()
+        'created_at': datetime.now(timezone.utc).isoformat()
     }
     
-    supabase.table('posts').insert(comment_data).execute()
-    supabase.rpc('increment_comment_count', {'post_id': data.get('post_id')}).execute()
+    supabase.table('comments').insert(comment_data).execute()
+    
+    return jsonify({'success': True, 'comment_id': comment_id})
+
+@app.route('/api/customer/post/delete', methods=['POST'])
+def delete_post():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    post_id = data.get('post_id')
+    
+    # Verify ownership
+    post = supabase.table('posts').select('user_id').eq('id', post_id).execute()
+    if not post.data:
+        return jsonify({'error': 'Post not found'}), 404
+    
+    if post.data[0]['user_id'] != session['user_id']:
+        return jsonify({'error': 'Not authorized to delete this post'}), 403
+    
+    # Delete post (cascade will delete comments and likes)
+    supabase.table('posts').delete().eq('id', post_id).execute()
     
     return jsonify({'success': True})
-
-
 
 @app.route('/api/vendor/profile', methods=['GET'])
 def get_vendor_profile():
@@ -5732,11 +5906,18 @@ def create_customer_review():
 # ============================================
 
 @app.route('/api/customer/products/<vendor_id>', methods=['GET'])
-def get_customer_products(vendor_id):
-    products = get_products_by_vendor(vendor_id)
-    for p in products:
-        p.pop('stock', None)
-    return jsonify({'products': products})
+def get_vendor_products(vendor_id):
+    """Get products for a specific vendor"""
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    products_result = supabase.table('products')\
+        .select('*')\
+        .eq('vendor_id', vendor_id)\
+        .execute()
+    
+    return jsonify({'products': products_result.data})
 
 # ============================================
 # SHORTLIST ENDPOINTS
@@ -5830,15 +6011,48 @@ def get_vendor_data():
     if not vendor:
         return jsonify({'error': 'Vendor not found'}), 404
     
-    products = get_products_by_vendor(vendor['id'])
+    # Get products
+    products_result = supabase.table('products')\
+        .select('*')\
+        .eq('vendor_id', vendor['id'])\
+        .execute()
     
-    # Get vendor's posts
-    posts = supabase.table('posts').select('*').eq('user_id', session['user_id']).order('created_at', desc=True).execute()
+    products = []
+    for p in products_result.data:
+        products.append({
+            'id': p.get('id'),
+            'name': p.get('name'),
+            'description': p.get('description', ''),
+            'category': p.get('category', ''),
+            'price': float(p.get('price', 0)),
+            'stock': p.get('stock', 0),
+            'images': p.get('images', []),
+            'priceTiers': p.get('priceTiers', [])  # Add priceTiers
+        })
+    
+    # Get posts
+    posts_result = supabase.table('posts')\
+        .select('*')\
+        .eq('user_id', session['user_id'])\
+        .order('created_at', desc=True)\
+        .execute()
+    
+    posts = []
+    for post in posts_result.data:
+        posts.append({
+            'id': post.get('id'),
+            'content': post.get('content'),
+            'images': post.get('images', []),
+            'likes': post.get('likes', 0),
+            'comment_count': post.get('comment_count', 0),
+            'saves': post.get('saves', 0),
+            'created_at': post.get('created_at')
+        })
     
     return jsonify({
         'vendor': vendor,
         'products': products,
-        'posts': posts.data or []
+        'posts': posts
     })
 
 @app.route('/api/vendor/update-open-status', methods=['POST'])
@@ -5861,27 +6075,30 @@ def get_vendor_posts_route():
     if not session or session['role'] != 'vendor':
         return jsonify({'error': 'Unauthorized'}), 401
     
-    posts = supabase.table('posts').select('*, users(full_name)').eq('user_id', session['user_id']).order('created_at', desc=True).execute()
+    # Fix: Use specific foreign key name or fetch separately
+    posts = supabase.table('posts')\
+        .select('*')\
+        .eq('user_id', session['user_id'])\
+        .order('created_at', desc=True)\
+        .execute()
     
-    result = []
-    for p in (posts.data or []):
-        # Get like count
-        likes = supabase.table('post_likes').select('*', count='exact').eq('post_id', p['id']).execute()
-        # Get comment count
-        comments = supabase.table('posts').select('*', count='exact').eq('parent_id', p['id']).execute()
-        
-        result.append({
-            'id': p['id'],
-            'content': p['content'],
-            'images': p.get('images', []),
-            'likes': likes.count or 0,
-            'comment_count': comments.count or 0,
-            'saves': 0,
-            'created_at': p['created_at'],
-            'author': p.get('users', {}).get('full_name', 'Vendor') if p.get('users') else 'Vendor'
+    # Get user names separately if needed
+    posts_data = []
+    for post in posts.data:
+        # Get vendor name from vendors table
+        vendor = get_vendor_by_user_id(session['user_id'])
+        posts_data.append({
+            'id': post.get('id'),
+            'content': post.get('content'),
+            'images': post.get('images', []),
+            'likes': post.get('likes', 0),
+            'comment_count': post.get('comment_count', 0),
+            'saves': post.get('saves', 0),
+            'created_at': post.get('created_at'),
+            'business_name': vendor.get('business_name') if vendor else 'Vendor'
         })
     
-    return jsonify({'posts': result})
+    return jsonify({'posts': posts_data})
 
 @app.route('/api/vendor/post/create', methods=['POST'])
 def create_vendor_post():
@@ -6079,7 +6296,32 @@ def get_vendor_reviews_route():
     if not vendor:
         return jsonify({'error': 'Vendor not found'}), 404
     
-    reviews = get_reviews_by_vendor(vendor['id'])
+    # Fetch reviews from Supabase reviews table
+    reviews_result = supabase.table('reviews')\
+        .select('*')\
+        .eq('vendor_id', vendor['id'])\
+        .order('created_at', desc=True)\
+        .execute()
+    
+    reviews = []
+    for r in reviews_result.data:
+        # Get customer name from users table if available
+        customer_name = 'Customer'
+        if r.get('user_id'):
+            user_result = supabase.table('users').select('name').eq('id', r['user_id']).execute()
+            if user_result.data:
+                customer_name = user_result.data[0].get('name', 'Customer')
+        elif r.get('customer_name'):
+            customer_name = r['customer_name']
+        
+        reviews.append({
+            'id': r['id'],
+            'customer_name': customer_name,
+            'rating': r.get('rating', 0),
+            'comment': r.get('comment', ''),
+            'created_at': r.get('created_at')
+        })
+    
     return jsonify({'reviews': reviews})
 
 @app.route('/api/vendor/product/create', methods=['POST'])
@@ -6093,18 +6335,23 @@ def create_product_route():
         return jsonify({'error': 'Vendor not found'}), 404
     
     data = request.json
-    product_id = create_product(
-        vendor['id'], 
-        data.get('name'), 
-        data.get('description'), 
-        data.get('category'), 
-        data.get('price'), 
-        data.get('images', []),
-        0  # stock = 0 (hidden from UI)
-    )
     
-    if product_id:
-        return jsonify({'success': True, 'product_id': product_id})
+    # Create product with priceTiers
+    product_data = {
+        'vendor_id': vendor['id'],
+        'name': data.get('name'),
+        'description': data.get('description'),
+        'category': data.get('category'),
+        'price': data.get('price'),
+        'images': data.get('images', []),
+        'stock': 0,
+        'priceTiers': data.get('priceTiers', [])  # ADD THIS LINE
+    }
+    
+    result = supabase.table('products').insert(product_data).execute()
+    
+    if result.data:
+        return jsonify({'success': True, 'product_id': result.data[0]['id']})
     return jsonify({'error': 'Failed to create product'}), 500
 
 @app.route('/api/vendor/product/update', methods=['POST'])
@@ -6125,18 +6372,23 @@ def update_product_route():
     if product.data[0]['vendor_id'] != vendor['id']:
         return jsonify({'error': 'Unauthorized'}), 403
     
+    # Update product data INCLUDING priceTiers
     product_data = {
         'name': data.get('name'),
         'description': data.get('description'),
         'category': data.get('category'),
         'price': data.get('price'),
         'stock': 0,
-        'images': data.get('images', [])
+        'images': data.get('images', []),
+        'priceTiers': data.get('priceTiers', [])  # ADD THIS LINE
     }
     
-    success = update_product(product_id, product_data)
+    # Remove None values
+    product_data = {k: v for k, v in product_data.items() if v is not None}
     
-    if success:
+    result = supabase.table('products').update(product_data).eq('id', product_id).execute()
+    
+    if result.data:
         return jsonify({'success': True})
     return jsonify({'error': 'Failed to update product'}), 500
 
@@ -6158,9 +6410,9 @@ def delete_product_route():
     if product.data[0]['vendor_id'] != vendor['id']:
         return jsonify({'error': 'Unauthorized'}), 403
     
-    success = delete_product(product_id)
+    result = supabase.table('products').delete().eq('id', product_id).execute()
     
-    if success:
+    if result.data or not result.error:
         return jsonify({'success': True})
     return jsonify({'error': 'Failed to delete product'}), 500
 

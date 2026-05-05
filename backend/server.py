@@ -2019,15 +2019,20 @@ function initLocationMap(){
     map = L.map('locationMap').setView([13.9500, 121.3167], 15);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
     map.on('click', function(e){ pinLocation(e.latlng.lat, e.latlng.lng); });
+    
     if(navigator.geolocation){
         navigator.geolocation.getCurrentPosition(function(position){
             let lat = position.coords.latitude;
             let lng = position.coords.longitude;
             map.setView([lat, lng], 16);
             pinLocation(lat, lng);
-            showToast('📍 Location detected!');
-        }, function(error){ showToast('📍 Tap on the map to pin your location'); });
-    } else { showToast('📍 Tap on the map to pin your location'); }
+            showToast('📍 Location detected! Review and click "Confirm Location" to continue');
+        }, function(error){ 
+            showToast('📍 Tap on the map to pin your location'); 
+        });
+    } else { 
+        showToast('📍 Tap on the map to pin your location'); 
+    }
 }
 
 function pinLocation(lat, lng){
@@ -2035,17 +2040,17 @@ function pinLocation(lat, lng){
     currentMarker = L.marker([lat, lng], {draggable: true}).addTo(map);
     currentMarker.on('dragend', function(e){ let pos = e.target.getLatLng(); pinLocation(pos.lat, pos.lng); });
     regData.location.lat = lat; regData.location.lng = lng; regData.locationConfirmed = false;
+    document.getElementById('confirmLocBtn').disabled = false;
+    document.getElementById('confirmLocBtn').innerHTML = '<i class="fas fa-check"></i> Confirm Location';
+    
     fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
         .then(res => res.json()).then(data => {
             let address = data.display_name || `${lat}, ${lng}`;
             regData.location.address = address;
             document.getElementById('locationText').innerHTML = address.split(',').slice(0,4).join(',');
-            document.getElementById('confirmLocBtn').disabled = false;
-            document.getElementById('confirmLocBtn').innerHTML = '<i class="fas fa-check"></i> Confirm Location';
         }).catch(() => {
             regData.location.address = `${lat}, ${lng}`;
             document.getElementById('locationText').innerHTML = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-            document.getElementById('confirmLocBtn').disabled = false;
         });
 }
 
@@ -2056,27 +2061,6 @@ function confirmLocation(){
     document.getElementById('confirmLocBtn').disabled = true;
     showToast('Location confirmed!');
     setTimeout(() => { q++; render(); }, 500);
-}
-
-function filterCategorySuggestions(){
-    let input = document.getElementById('categoryInput');
-    if(!input) return;
-    let value = input.value.toLowerCase();
-    let suggestions = DEFAULT_CATEGORIES.filter(c => c.toLowerCase().includes(value));
-    let container = document.getElementById('categorySuggestions');
-    if(value && suggestions.length > 0){
-        container.innerHTML = suggestions.map(s => `<div class="suggestion-item" onclick="selectCategorySuggestion('${s.replace(/'/g, "\\'")}')">${s}</div>`).join('');
-        container.style.display = 'block';
-    } else {
-        container.style.display = 'none';
-    }
-}
-
-function selectCategorySuggestion(cat){
-    regData.category = cat;
-    let input = document.getElementById('categoryInput');
-    if(input) input.value = cat;
-    document.getElementById('categorySuggestions').style.display = 'none';
 }
 
 function render(){
@@ -2118,7 +2102,7 @@ function render(){
             html += '<div class="category-input-wrapper"><input type="text" id="categoryInput" class="input" placeholder="Enter or select a category" value="'+(regData.category || '')+'" oninput="filterCategorySuggestions()" autocomplete="off"><div id="categorySuggestions" class="category-suggestions" style="display:none"></div></div><div class="subtitle" style="font-size:12px;color:#8ba88b;margin-top:8px"><i class="fas fa-info-circle"></i> You can type any category or select from suggestions</div>';
         }
         else if(current === 'Business location'){
-            html += '<div class="map-container" id="locationMap"></div><div class="location-badge"><i class="fas fa-location-dot"></i><div class="location-text" id="locationText">Tap on the map to pin your location</div><button class="refresh-loc" onclick="centerOnUserMap()"><i class="fas fa-crosshairs"></i></button></div><button class="confirm-loc" id="confirmLocBtn" onclick="confirmLocation()" disabled><i class="fas fa-map-pin"></i> Confirm Location</button>';
+            html += '<div class="map-container" id="locationMap"></div><div class="location-badge"><i class="fas fa-location-dot"></i><div class="location-text" id="locationText">Waiting for location...</div><button class="refresh-loc" onclick="centerOnUserMap()"><i class="fas fa-crosshairs"></i></button></div><button class="confirm-loc" id="confirmLocBtn" onclick="confirmLocation()" disabled><i class="fas fa-map-pin"></i> Confirm Location</button>';
             setTimeout(initLocationMap, 100);
         }
         else if(current === 'Profile photo'){
@@ -2137,7 +2121,6 @@ function render(){
             html += '<div class="input-group"><input type="password" id="pwdInput" placeholder="Create a password" oninput="checkPasswordStrength()" value="'+(regData.password||'')+'"><span class="toggle-pwd" onclick="togglePwd(\'pwdInput\')"><i class="fas fa-eye"></i></span></div><div class="input-group"><input type="password" id="confirmPwdInput" placeholder="Confirm your password" oninput="checkConfirmMatch()" value="'+(regData.password||'')+'"><span class="toggle-pwd" onclick="togglePwd(\'confirmPwdInput\')"><i class="fas fa-eye"></i></span></div><div class="strength-bar"><div class="strength-fill" id="strengthFill"></div></div><div class="strength-text" id="strengthText"></div><div id="matchMsg" style="font-size:12px;margin-top:8px"></div>';
         }
         else if(current === 'Confirm password'){
-            // This is handled in Create password step above, but kept for flow
             html += '<div class="input-group"><input type="password" id="confirmPwdInput" placeholder="Confirm your password" oninput="checkConfirmMatch()" value="'+(regData.password||'')+'"><span class="toggle-pwd" onclick="togglePwd(\'confirmPwdInput\')"><i class="fas fa-eye"></i></span></div><div id="matchMsg" style="font-size:12px;margin-top:8px"></div>';
         }
         else if(current === 'Your preferences'){
@@ -2242,7 +2225,17 @@ function toggleVendorPref(cat){ let idx = regData.preferences.vendorCategories.i
 function toggleProductPref(cat){ let idx = regData.preferences.productCategories.indexOf(cat); if(idx === -1) regData.preferences.productCategories.push(cat); else regData.preferences.productCategories.splice(idx,1); render(); }
 function updateRange(){ let max = parseInt(document.getElementById('priceMax')?.value||500); regData.preferences.priceMax = max; let d = document.getElementById('priceDisplay'); if(d) d.innerText = '₱'+max; }
 function updateDist(){ let v = parseInt(document.getElementById('distance')?.value||10); regData.preferences.maxDistance = v; let d = document.getElementById('distDisplay'); if(d) d.innerText = v+'km'; }
-function centerOnUserMap(){ if(navigator.geolocation){ navigator.geolocation.getCurrentPosition(function(pos){ if(map) map.setView([pos.coords.latitude, pos.coords.longitude], 16); pinLocation(pos.coords.latitude, pos.coords.longitude); showToast('📍 Location updated'); }, function(){ showToast('Could not get your location'); }); } }
+function centerOnUserMap(){ 
+    if(navigator.geolocation){
+        navigator.geolocation.getCurrentPosition(function(pos){ 
+            if(map) map.setView([pos.coords.latitude, pos.coords.longitude], 16); 
+            pinLocation(pos.coords.latitude, pos.coords.longitude); 
+            showToast('📍 Location updated'); 
+        }, function(){ 
+            showToast('Could not get your location'); 
+        });
+    } 
+}
 
 function openForgotModal(){ step = 'forgot'; resetStage = 0; forgotIdentifier = ''; forgotOtp = ''; render(); }
 function moveNextReset(i, idx){ if(i.value.length === 1){ let next = document.getElementById(`resetOtp_${idx+1}`); if(next) next.focus(); } }
@@ -3318,6 +3311,7 @@ body{background:#f5f8f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .map-controls{position:absolute;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:400}
 .map-control-btn{width:44px;height:44px;background:white;border:none;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:pointer;color:#3a7b4d;font-size:18px}
 .map-control-btn.active{background:#3a7b4d;color:white}
+.map-control-btn:active{transform:scale(0.95)}
 .btn{width:100%;padding:12px;background:#3a7b4d;color:white;border:none;border-radius:30px;font-size:15px;font-weight:600;cursor:pointer}
 .btn-outline{background:white;border:1px solid #3a7b4d;color:#3a7b4d;padding:10px;border-radius:30px;font-size:14px;font-weight:500;cursor:pointer}
 .btn-sm{padding:6px 14px;font-size:13px;width:auto}
@@ -3402,6 +3396,13 @@ body{background:#f5f8f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .visit-name{font-weight:600}
 .visit-time{font-size:11px;color:#8da38d}
 .countdown-timer{font-size:12px;color:#e53935;margin-top:8px}
+.location-permission-toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2c3e2c;color:white;padding:20px 24px;border-radius:20px;text-align:center;z-index:2000;box-shadow:0 4px 20px rgba(0,0,0,0.3);animation:fadeIn 0.3s;max-width:90%;width:320px}
+.location-permission-toast button{background:#3a7b4d;color:white;border:none;padding:10px 20px;border-radius:30px;margin-top:12px;cursor:pointer;width:100%}
+.location-permission-toast button.secondary{background:#6c757d;margin-top:8px}
+@keyframes fadeIn{from{opacity:0;transform:translate(-50%,-40%)}to{opacity:1;transform:translate(-50%,-50%)}}
+.address-search-container{display:flex;gap:8px;margin-bottom:12px}
+.address-search-container input{flex:1;padding:10px 14px;border:1px solid #e0e8e0;border-radius:30px;font-size:14px}
+.address-search-container button{background:#3a7b4d;color:white;border:none;padding:10px 16px;border-radius:30px;cursor:pointer}
 </style>
 
 <div class="app-bar">
@@ -3469,48 +3470,192 @@ let productVisits = [];
 let pendingVerificationType = null;
 let pendingVerificationValue = null;
 let countdownInterval = null;
+let locationAttempts = 0;
 
 const TIAONG_LAT = 13.9500;
 const TIAONG_LNG = 121.3167;
 
 if (!sessionToken) window.location.href = '/auth';
 
-function useFallbackLocation() {
-    if (fallbackUsed) return;
-    fallbackUsed = true;
-    userLocation = { lat: TIAONG_LAT, lng: TIAONG_LNG };
-    showToast('Using Tiaong, Quezon as default location');
-    if (watchId) navigator.geolocation.clearWatch(watchId);
-    loadData();
+function isInAppBrowser() {
+    const ua = navigator.userAgent || navigator.vendor;
+    const isFacebook = ua.includes('FBAN') || ua.includes('FBAV');
+    const isInstagram = ua.includes('Instagram');
+    const isMessenger = ua.includes('MESSENGER');
+    return isFacebook || isInstagram || isMessenger;
 }
 
-if (navigator.geolocation) {
-    let locationTimeout = setTimeout(() => {
-        if (!userLocation) useFallbackLocation();
-    }, 5000);
+function showLocationPermissionDialog() {
+    let existing = document.querySelector('.location-permission-toast');
+    if(existing) existing.remove();
     
-    watchId = navigator.geolocation.watchPosition(
+    let inAppMsg = '';
+    if(isInAppBrowser()) {
+        inAppMsg = '<p style="font-size:12px;margin-top:8px;color:#ffd966">⚠️ For best results, open in Chrome/Safari browser</p>';
+    }
+    
+    let dialog = document.createElement('div');
+    dialog.className = 'location-permission-toast';
+    dialog.innerHTML = `
+        <i class="fas fa-map-marker-alt" style="font-size:38px;margin-bottom:12px;display:block"></i>
+        <strong>Enable Location Services</strong>
+        <p style="margin-top:8px;font-size:13px">Lako needs your location to find nearby street food vendors in Tiaong, Quezon.</p>
+        ${inAppMsg}
+        <button onclick="requestLocationPermission()">Allow Location Access</button>
+        <button class="secondary" onclick="showAddressSearch()">Enter Address Manually</button>
+        <button class="secondary" onclick="useDefaultLocation()">Use Default Location</button>
+    `;
+    document.body.appendChild(dialog);
+}
+
+function showAddressSearch() {
+    let dialog = document.querySelector('.location-permission-toast');
+    if(dialog) dialog.remove();
+    
+    let searchHtml = `
+        <div class="card" style="margin-top:0">
+            <h4>Enter Your Location</h4>
+            <div class="address-search-container">
+                <input type="text" id="addressSearchInput" placeholder="Enter barangay or street in Tiaong, Quezon">
+                <button onclick="searchAddress()"><i class="fas fa-search"></i></button>
+            </div>
+            <div id="addressSearchResults" style="max-height:200px;overflow-y:auto"></div>
+            <button class="btn-outline btn-sm mt-2" onclick="useDefaultLocation()">Use Tiaong Center</button>
+        </div>
+    `;
+    document.getElementById('content').innerHTML = searchHtml;
+    page = 'locationSearch';
+}
+
+async function searchAddress() {
+    let query = document.getElementById('addressSearchInput').value;
+    if(!query || query.length < 3) {
+        showToast('Enter at least 3 characters');
+        return;
+    }
+    
+    showToast('Searching...');
+    
+    try {
+        let fullQuery = `${query}, Tiaong, Quezon, Philippines`;
+        let res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullQuery)}&limit=5`);
+        let data = await res.json();
+        
+        let resultsDiv = document.getElementById('addressSearchResults');
+        if(data && data.length > 0) {
+            resultsDiv.innerHTML = data.map(place => `
+                <div class="card" style="margin-bottom:8px;cursor:pointer" onclick="setLocationFromSearch(${place.lat}, ${place.lon}, '${place.display_name.replace(/'/g, "\\'")}')">
+                    <strong>${place.display_name.split(',')[0]}</strong>
+                    <div class="text-secondary" style="font-size:11px">${place.display_name.split(',').slice(0,3).join(',')}</div>
+                </div>
+            `).join('');
+        } else {
+            resultsDiv.innerHTML = '<div class="text-secondary text-center">No results found. Try "Tiaong"</div>';
+        }
+    } catch(e) {
+        showToast('Search failed. Please try again.');
+    }
+}
+
+function setLocationFromSearch(lat, lng, address) {
+    userLocation = { lat: parseFloat(lat), lng: parseFloat(lng) };
+    showToast(`📍 Location set to ${address.split(',')[0]}`);
+    fallbackUsed = false;
+    
+    if (watchId) navigator.geolocation.clearWatch(watchId);
+    
+    page = 'map';
+    loadData();
+    if (map) {
+        map.setView([userLocation.lat, userLocation.lng], 16);
+        if (userMarker) userMarker.setLatLng([userLocation.lat, userLocation.lng]);
+    }
+    showPage('map');
+}
+
+function requestLocationPermission() {
+    let dialog = document.querySelector('.location-permission-toast');
+    if(dialog) dialog.remove();
+    
+    showToast('📍 Requesting location permission...');
+    initLocation();
+}
+
+function useDefaultLocation() {
+    let dialog = document.querySelector('.location-permission-toast');
+    if(dialog) dialog.remove();
+    
+    fallbackUsed = true;
+    userLocation = { lat: TIAONG_LAT, lng: TIAONG_LNG };
+    showToast('📍 Using Tiaong, Quezon as default location');
+    if (watchId) navigator.geolocation.clearWatch(watchId);
+    loadData();
+    if (map && page === 'map') {
+        map.setView([userLocation.lat, userLocation.lng], 14);
+        if (userMarker) userMarker.setLatLng([userLocation.lat, userLocation.lng]);
+    }
+}
+
+function initLocation() {
+    if (!navigator.geolocation) {
+        showToast('⚠️ Geolocation not supported by your browser');
+        showLocationPermissionDialog();
+        return;
+    }
+    
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        showToast('⚠️ Location requires HTTPS. Using default location.');
+        showLocationPermissionDialog();
+        return;
+    }
+    
+    if (isInAppBrowser()) {
+        showToast('⚠️ For best location accuracy, open in Chrome/Safari');
+    }
+    
+    locationAttempts = 0;
+    tryGetLocation();
+}
+
+function tryGetLocation() {
+    locationAttempts++;
+    const maxAttempts = 3;
+    
+    navigator.geolocation.getCurrentPosition(
         function(pos) {
-            clearTimeout(locationTimeout);
-            let newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-            if (!userLocation) {
-                userLocation = newLoc;
-                showToast('GPS location acquired!');
-                loadData();
-            } else {
-                userLocation = newLoc;
-                if (map && userMarker) userMarker.setLatLng([userLocation.lat, userLocation.lng]);
-                if (page === 'map') updateNearbyList();
+            userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            showToast('📍 Location detected! Finding vendors near you...');
+            fallbackUsed = false;
+            if (watchId) navigator.geolocation.clearWatch(watchId);
+            loadData();
+            if (map && page === 'map') {
+                map.setView([userLocation.lat, userLocation.lng], 16);
+                if (userMarker) userMarker.setLatLng([userLocation.lat, userLocation.lng]);
             }
         },
         function(error) {
-            clearTimeout(locationTimeout);
-            useFallbackLocation();
+            console.log('Geolocation error:', error);
+            
+            if (error.code === error.PERMISSION_DENIED) {
+                showLocationPermissionDialog();
+            } else if (error.code === error.TIMEOUT && locationAttempts < maxAttempts) {
+                showToast(`🔄 Retrying location... Attempt ${locationAttempts + 1}/${maxAttempts}`);
+                setTimeout(tryGetLocation, 2000);
+            } else {
+                let errorMsg = 'Could not get your location.';
+                if (error.code === error.POSITION_UNAVAILABLE) {
+                    errorMsg = 'Location unavailable. Using Tiaong as default.';
+                }
+                showToast(errorMsg);
+                showLocationPermissionDialog();
+            }
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        { 
+            enableHighAccuracy: true, 
+            timeout: 10000, 
+            maximumAge: 30000
+        }
     );
-} else {
-    useFallbackLocation();
 }
 
 function showToast(msg){
@@ -3552,6 +3697,7 @@ async function api(url, options = {}) {
 }
 
 async function loadData() {
+    if (!userLocation) return;
     await loadVendorsAndProducts();
     await loadSaved();
     await loadFollows();
@@ -3613,8 +3759,9 @@ async function recordProductVisit(productId, productName, vendorId, category) {
 }
 
 async function loadVendorsAndProducts() {
-    const lat = userLocation?.lat || TIAONG_LAT;
-    const lng = userLocation?.lng || TIAONG_LNG;
+    if (!userLocation) return;
+    const lat = userLocation.lat;
+    const lng = userLocation.lng;
     const vendorsData = await api(`/api/customer/map/vendors?lat=${lat}&lng=${lng}`);
     
     if (vendorsData && vendorsData.vendors) {
@@ -3686,10 +3833,10 @@ function showMap() {
     document.getElementById('content').innerHTML = `
         <div class="flex justify-between items-center mb-2">
             <div class="location-badge"><span class="gps-indicator"></span> ${fallbackUsed ? 'Tiaong, Quezon (Default)' : 'Live GPS Location'}</div>
-            <button class="btn-outline btn-sm" onclick="centerOnUser()">Recenter</button>
+            <button class="btn-outline btn-sm" onclick="showLocationPermissionDialog()"><i class="fas fa-map-marker-alt"></i> Change Location</button>
         </div>
         <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="searchBox" placeholder="Search vendors..." oninput="filterMapMarkers()"></div>
-        <div class="map-wrapper"><div class="map-container"><div id="map"></div><div class="map-controls"><button class="map-control-btn" onclick="centerOnUser()"><i class="fas fa-location-dot"></i></button><button class="map-control-btn ${heatActive ? 'active' : ''}" id="heatBtn" onclick="toggleHeatmap()"><i class="fas fa-fire"></i></button></div></div></div>
+        <div class="map-wrapper"><div class="map-container"><div id="map"></div><div class="map-controls"><button class="map-control-btn" id="locateBtn" onclick="requestLocationPermission()"><i class="fas fa-location-dot"></i></button><button class="map-control-btn ${heatActive ? 'active' : ''}" id="heatBtn" onclick="toggleHeatmap()"><i class="fas fa-fire"></i></button></div></div></div>
         <div id="nearbyList"></div>`;
     
     setTimeout(() => {
@@ -3744,10 +3891,12 @@ function showMap() {
 
 function updateNearbyList() {
     let list = document.getElementById('nearbyList');
-    if (list && allVendors.length) {
+    if (list && allVendors.length && userLocation) {
         let filtered = allVendors.filter(v => v.distance && v.distance <= userPreferences.maxDistance);
         let sorted = [...filtered].sort((a,b) => (a.distance||999) - (b.distance||999)).slice(0,8);
         list.innerHTML = `<h4 class="mb-2">Nearby Vendors (within ${userPreferences.maxDistance}m)</h4>` + sorted.map(v => `<div class="card" onclick="showVendorModal('${v.id}')"><div class="flex justify-between"><strong>${escapeHtml(v.business_name)}</strong><span class="text-secondary">${Math.round(v.distance)}m</span></div><div class="text-secondary">${escapeHtml(v.category)}</div><div class="stars mt-1">${'★'.repeat(Math.floor(v.rating||0))}</div><button class="btn-outline btn-sm mt-2" onclick="event.stopPropagation(); showRoute(${v.latitude}, ${v.longitude}, '${escapeHtml(v.business_name)}')">Directions</button></div>`).join('');
+    } else if (list && allVendors.length === 0) {
+        list.innerHTML = '<div class="card text-center text-secondary">No vendors found nearby</div>';
     }
 }
 
@@ -3767,13 +3916,6 @@ function filterMapMarkers() {
             markerCluster.addLayer(L.marker([v.latitude, v.longitude], { icon: vendorIcon }));
         }
     });
-}
-
-function centerOnUser() { 
-    if(map && userLocation) {
-        map.setView([userLocation.lat, userLocation.lng], 16);
-        showToast('Centered on your location');
-    }
 }
 
 function toggleHeatmap() {
@@ -3805,6 +3947,7 @@ function getRouteSteps(route) {
 function showRoute(destLat, destLng, destName) {
     if (!userLocation) { 
         showToast('Getting your location...'); 
+        requestLocationPermission();
         return; 
     }
     
@@ -4660,7 +4803,8 @@ function confirmLogout() { if(confirm('Logout from Lako?')) { if(watchId) naviga
     document.head.appendChild(leafletScript);
 })();
 
-loadData();
+// Initialize location and load data
+initLocation();
 </script>
 ''')
 

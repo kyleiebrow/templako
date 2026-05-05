@@ -1760,19 +1760,24 @@ h2{font-size:26px;font-weight:700;color:#1a2e1a;margin-bottom:8px}
 .input-group input{width:100%;padding:14px 16px;border:1.5px solid #e0e8e0;border-radius:14px;font-size:16px;background:#f8faf8}
 .input-group input:focus{outline:none;border-color:#2d8c3c;background:white}
 .toggle-pwd{position:absolute;right:16px;top:50%;transform:translateY(-50%);cursor:pointer;color:#8ba88b;font-size:18px}
-button{width:100%;padding:15px;background:#2d8c3c;color:white;border:none;border-radius:44px;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px}
+button{width:100%;padding:15px;background:#2d8c3c;color:white;border:none;border-radius:44px;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px;transition:all 0.2s}
 button:active{transform:scale(0.97);background:#1a6b28}
-button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
+button.secondary{background:white;color:#2d8c3c;border:1.5px solid #2d8c3c}
+button.secondary:active{background:#e8f5e9;transform:scale(0.97)}
+button.tertiary{background:transparent;color:#6b8c6b;border:1px solid #e0e8e0;margin-top:0}
+button.tertiary:active{background:#f5faf5}
 .flex{display:flex;gap:12px;margin-top:16px}
 .flex button{flex:1;margin-top:0}
-.step-bars{display:flex;justify-content:center;gap:6px;margin-bottom:28px}
+.step-bars{display:flex;justify-content:center;gap:6px;margin-bottom:28px;flex-wrap:wrap}
 .bar{width:32px;height:4px;background:#e0e8e0;border-radius:4px}
 .bar.active{background:#2d8c3c;width:48px}
 .bar.completed{background:#2d8c3c}
 .category-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:20px 0;max-height:300px;overflow-y:auto}
-.category-chip{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:40px;padding:12px;text-align:center;cursor:pointer;font-size:14px;font-weight:500;color:#1a2e1a}
+.category-chip{background:#f8faf8;border:1.5px solid #e0e8e0;border-radius:40px;padding:12px;text-align:center;cursor:pointer;font-size:14px;font-weight:500;color:#1a2e1a;transition:all 0.2s}
 .category-chip.selected{background:#2d8c3c;color:white;border-color:#2d8c3c}
-.upload-area{background:#f8faf8;border:2px dashed #c0d0c0;border-radius:16px;padding:20px;text-align:center;cursor:pointer;margin:16px 0}
+.category-chip:active{transform:scale(0.96)}
+.upload-area{background:#f8faf8;border:2px dashed #c0d0c0;border-radius:16px;padding:20px;text-align:center;cursor:pointer;margin:16px 0;transition:all 0.2s}
+.upload-area:active{background:#f0f4f0;transform:scale(0.98)}
 .upload-area i{font-size:32px;color:#2d8c3c;margin-bottom:8px;display:block}
 .file-info{display:flex;align-items:center;gap:12px;padding:12px;background:#f8faf8;border-radius:12px;margin-top:12px}
 .thumbnail{width:50px;height:50px;border-radius:12px;object-fit:cover}
@@ -1780,10 +1785,11 @@ button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
 .location-badge{background:#f8faf8;border-radius:12px;padding:12px;margin:12px 0;display:flex;align-items:center;gap:12px;border:1px solid #e0e8e0}
 .location-badge i{color:#2d8c3c;font-size:18px}
 .location-text{flex:1;font-size:13px}
-.refresh-loc{background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer}
+.refresh-loc{background:#f0f4f0;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;transition:all 0.2s}
+.refresh-loc:active{transform:scale(0.95)}
 .confirm-loc{width:100%;padding:12px;background:#2d8c3c;color:white;border:none;border-radius:40px;cursor:pointer;margin-top:12px}
 .otp-box{display:flex;gap:12px;justify-content:center;margin:28px 0}
-.otp-input{width:52px;height:60px;text-align:center;font-size:26px;font-weight:700;border:1.5px solid #e0e8e0;border-radius:14px;background:white}
+.otp-input{width:52px;height:60px;text-align:center;font-size:26px;font-weight:700;border:1.5px solid #e0e8e0;border-radius:14px;background:white;transition:all 0.2s}
 .otp-input:focus{outline:none;border-color:#2d8c3c}
 .checkbox-row{display:flex;align-items:center;gap:12px;margin:20px 0}
 .checkbox-row input{width:18px;height:18px;accent-color:#2d8c3c}
@@ -1800,18 +1806,25 @@ button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
 .contact-method{display:flex;gap:16px;margin:20px 0;justify-content:center}
 .method-btn{flex:1;padding:16px;background:#f8faf8;border:2px solid #e0e8e0;border-radius:16px;cursor:pointer;text-align:center;transition:all 0.2s}
 .method-btn.active{border-color:#2d8c3c;background:#e8f5e9}
+.method-btn:active{transform:scale(0.96)}
 .method-btn i{font-size:28px;display:block;margin-bottom:8px;color:#2d8c3c}
 .method-btn span{font-size:13px;font-weight:600;color:#1a2e1a}
 .method-btn small{font-size:11px;color:#8ba88b;display:block}
-.eula-modal, .error-modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:3000;align-items:center;justify-content:center;padding:20px}
-.eula-modal.show, .error-modal.show{display:flex}
-.eula-content, .error-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px}
-.eula-header, .error-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#1a2e1a}
-.eula-close, .error-close{font-size:28px;cursor:pointer;color:#8ba88b;padding:8px}
+.eula-modal, .error-modal, .forgot-modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:3000;align-items:center;justify-content:center;padding:20px}
+.eula-modal.show, .error-modal.show, .forgot-modal.show{display:flex}
+.eula-content, .error-content, .forgot-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px}
+.eula-header, .error-header, .forgot-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#1a2e1a}
+.eula-close, .error-close, .forgot-close{font-size:28px;cursor:pointer;color:#8ba88b;padding:8px}
 .eula-text, .error-text{background:#f8faf8;padding:20px;border-radius:20px;font-size:14px;line-height:1.6;color:#4a5e4a;margin-bottom:20px}
 .error-icon{font-size:48px;color:#e53935;margin-bottom:16px}
 .forgot-link{text-align:center;margin-top:16px}
 .forgot-link a{color:#2d8c3c;text-decoration:none;font-size:13px}
+.slider-values{display:flex;justify-content:space-between;margin:8px 0;font-size:13px;color:#6b8c6b}
+.category-input-wrapper{position:relative}
+.category-suggestions{position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #e0e8e0;border-radius:14px;max-height:200px;overflow-y:auto;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.1)}
+.suggestion-item{padding:12px 16px;cursor:pointer;font-size:14px;transition:all 0.2s}
+.suggestion-item:hover{background:#e8f5e9;color:#2d8c3c}
+.suggestion-item:active{background:#2d8c3c;color:white}
 </style>
 
 <div class="header">
@@ -1821,7 +1834,7 @@ button.secondary{background:white;color:#2d8c3c;border:1.5px solid #e0e8e0}
 </div>
 <div class="container" id="content"></div>
 <div class="footer">
-    <p>Lako Beta Version | Developed by Alexander Collin P. Millichamp &amp; Kyle Brian M. Morillo</p>
+    <p>Lako Beta Version | Developed by Alexander Colin P. Millichamp &amp; Kyle Brian M. Morillo</p>
     <p>AITE College</p>
 </div>
 
@@ -1881,22 +1894,50 @@ let q = 0;
 let contactMethod = 'phone';
 let savedIdentifier = localStorage.getItem('saved_login_identifier') || '';
 let savedPassword = localStorage.getItem('saved_login_password') || '';
-let forgotEmail = '';
-let forgotPhone = '';
+let forgotIdentifier = '';
 let forgotOtp = '';
-let resetStage = 0; // 0: identifier, 1: otp, 2: new password
+let resetStage = 0;
 let regData = {
     email: '', phone: '', autoGeneratedEmail: '', password: '', full_name: '', business_name: '',
     user_name: '', category: '', location: {lat: null, lng: null, address: ''}, locationConfirmed: false,
     agreedToEula: false, profilePhoto: null, profilePhotoName: null, skippedPhoto: false,
     logo: null, logoName: null, skippedLogo: false, 
-    preferences: {categories: [], priceMin: 0, priceMax: 500, maxDistance: 10}
+    preferences: {vendorCategories: [], productCategories: [], priceMin: 0, priceMax: 500, maxDistance: 10}
 };
 let otpInterval = null;
 let map = null;
 let currentMarker = null;
+let availableVendorCategories = [];
+let availableProductCategories = [];
 
-const CATEGORIES = ["Coffee","Pancit","Tusok Tusok","Contemporary Street food","Bread and Pastry","Lomi","Beverage","Sarisari Store","Karendirya","Traditional Desserts","Contemporary Desserts","Squidball","Siomai","Siopao","Taho","Balut and other poultry","Corn","Fruit shakes","Fruit Juice","Pares"];
+const DEFAULT_CATEGORIES = ["Coffee","Pancit","Tusok Tusok","Contemporary Street food","Bread and Pastry","Lomi","Beverage","Sarisari Store","Karendirya","Traditional Desserts","Contemporary Desserts","Squidball","Siomai","Siopao","Taho","Balut and other poultry","Corn","Fruit shakes","Fruit Juice","Pares"];
+
+async function fetchAvailableCategories() {
+    try {
+        let vendorRes = await fetch('/api/categories/vendors');
+        let vendorData = await vendorRes.json();
+        if(vendorData && vendorData.categories && vendorData.categories.length > 0) {
+            availableVendorCategories = vendorData.categories;
+        } else {
+            availableVendorCategories = [...DEFAULT_CATEGORIES];
+        }
+        
+        let productRes = await fetch('/api/categories/products');
+        let productData = await productRes.json();
+        if(productData && productData.categories && productData.categories.length > 0) {
+            availableProductCategories = productData.categories;
+        } else {
+            availableProductCategories = [...DEFAULT_CATEGORIES];
+        }
+        
+        if(availableVendorCategories.length === 0) availableVendorCategories = [...DEFAULT_CATEGORIES];
+        if(availableProductCategories.length === 0) availableProductCategories = [...DEFAULT_CATEGORIES];
+    } catch(e) {
+        console.log('Error fetching categories:', e);
+        availableVendorCategories = [...DEFAULT_CATEGORIES];
+        availableProductCategories = [...DEFAULT_CATEGORIES];
+    }
+}
 
 function showToast(m){let t=document.querySelector('.toast');if(t)t.remove();t=document.createElement('div');t.className='toast';t.innerHTML='<i class="fas fa-info-circle"></i> '+m;document.body.appendChild(t);setTimeout(()=>t.remove(),4000);}
 function showSuccessToast(m){let t=document.querySelector('.toast');if(t)t.remove();t=document.createElement('div');t.className='toast';t.style.background='#2d8c3c';t.innerHTML='<i class="fas fa-check-circle"></i> '+m;document.body.appendChild(t);setTimeout(()=>t.remove(),5000);}
@@ -1956,12 +1997,12 @@ function getStepMsg(currentQuestion){
         'Your name': 'Tell us what to call you',
         'Business name': 'What is the name of your business?',
         'Business category': 'Select the category that best describes your business',
-        'Business location': 'Pin your exact location on the map',
-        'Profile photo': 'Add a photo (optional)',
+        'Business location': 'Pin your exact location on the map so customers can find you',
+        'Profile photo': 'Add a photo so customers can recognize you (optional)',
         'Business logo': 'Upload your business logo (optional)',
-        'Create password': 'Create a secure password',
-        'Confirm password': 'Confirm your password',
-        'Your preferences': 'Help us personalize your recommendations'
+        'Create password': 'Create a secure password for your account (min 6 characters)',
+        'Confirm password': 'Please confirm your password to continue',
+        'Your preferences': 'Help us personalize your food recommendations'
     };
     return stepMessages[currentQuestion] || 'Just a few more details';
 }
@@ -2017,6 +2058,27 @@ function confirmLocation(){
     setTimeout(() => { q++; render(); }, 500);
 }
 
+function filterCategorySuggestions(){
+    let input = document.getElementById('categoryInput');
+    if(!input) return;
+    let value = input.value.toLowerCase();
+    let suggestions = DEFAULT_CATEGORIES.filter(c => c.toLowerCase().includes(value));
+    let container = document.getElementById('categorySuggestions');
+    if(value && suggestions.length > 0){
+        container.innerHTML = suggestions.map(s => `<div class="suggestion-item" onclick="selectCategorySuggestion('${s.replace(/'/g, "\\'")}')">${s}</div>`).join('');
+        container.style.display = 'block';
+    } else {
+        container.style.display = 'none';
+    }
+}
+
+function selectCategorySuggestion(cat){
+    regData.category = cat;
+    let input = document.getElementById('categoryInput');
+    if(input) input.value = cat;
+    document.getElementById('categorySuggestions').style.display = 'none';
+}
+
 function render(){
     let c = document.getElementById('content');
     if(!c) return;
@@ -2031,10 +2093,17 @@ function render(){
         let html = '<div class="step-bars">'+questions.map(function(_,i){return '<div class="bar '+(i===q?'active':(i<q?'completed':''))+'"></div>';}).join('')+'</div><div class="card"><h2><i class="fas fa-user-plus"></i> '+current+'</h2><div class="subtitle">'+stepMsg+'</div>';
         
         if(current === 'Contact method'){
-            html += `<div class="contact-method"><div class="method-btn ${contactMethod === 'phone' ? 'active' : ''}" onclick="setContactMethod('phone')"><i class="fas fa-phone-alt"></i><span>Phone Only</span><small>Verification via SMS</small></div><div class="method-btn ${contactMethod === 'email' ? 'active' : ''}" onclick="setContactMethod('email')"><i class="fas fa-envelope"></i><span>Email Only</span><small>Verification via Email</small></div></div>`;
+            html += `<div class="contact-method">
+                <div class="method-btn ${contactMethod === 'phone' ? 'active' : ''}" onclick="setContactMethod('phone')">
+                    <i class="fas fa-phone-alt"></i><span>Phone Only</span><small>Verification via SMS</small>
+                </div>
+                <div class="method-btn ${contactMethod === 'email' ? 'active' : ''}" onclick="setContactMethod('email')">
+                    <i class="fas fa-envelope"></i><span>Email Only</span><small>Verification via Email</small>
+                </div>
+            </div>`;
         }
         else if(current === 'Phone number'){
-            html += '<div class="input-group"><input type="tel" id="ans" placeholder="9123456789" maxlength="11" oninput="formatPhoneNumber(this)" value="'+(regData.phone || '')+'"></div><div class="subtitle" style="font-size:12px;color:#8ba88b;margin-top:8px"><i class="fas fa-info-circle"></i> We will send a 6-digit code to 0'+(regData.phone || 'XXXXXXXXX')+'</div>';
+            html += '<div class="input-group"><input type="tel" id="ans" placeholder="9123456789" maxlength="11" oninput="formatPhoneNumber(this)" value="'+(regData.phone || '')+'"></div><div class="subtitle" style="font-size:12px;color:#8ba88b;margin-top:8px"><i class="fas fa-info-circle"></i> We will send a 6-digit code to this number</div>';
         }
         else if(current === 'Email address'){
             html += '<div class="input-group"><input type="email" id="ans" placeholder="you@example.com" value="'+(regData.email || '')+'"></div><div class="subtitle" style="font-size:12px;color:#8ba88b;margin-top:8px"><i class="fas fa-info-circle"></i> We will send a 6-digit code via email</div>';
@@ -2046,7 +2115,7 @@ function render(){
             html += '<div class="input-group"><input type="text" id="ans" placeholder="Your business name" value="'+(regData.business_name||'')+'"></div>';
         }
         else if(current === 'Business category'){
-            html += '<div class="category-grid">'+CATEGORIES.map(function(c){return '<div class="category-chip '+(regData.category===c?'selected':'')+'" onclick="selectCategory(\''+c+'\')">'+c+'</div>';}).join('')+'</div>';
+            html += '<div class="category-input-wrapper"><input type="text" id="categoryInput" class="input" placeholder="Enter or select a category" value="'+(regData.category || '')+'" oninput="filterCategorySuggestions()" autocomplete="off"><div id="categorySuggestions" class="category-suggestions" style="display:none"></div></div><div class="subtitle" style="font-size:12px;color:#8ba88b;margin-top:8px"><i class="fas fa-info-circle"></i> You can type any category or select from suggestions</div>';
         }
         else if(current === 'Business location'){
             html += '<div class="map-container" id="locationMap"></div><div class="location-badge"><i class="fas fa-location-dot"></i><div class="location-text" id="locationText">Tap on the map to pin your location</div><button class="refresh-loc" onclick="centerOnUserMap()"><i class="fas fa-crosshairs"></i></button></div><button class="confirm-loc" id="confirmLocBtn" onclick="confirmLocation()" disabled><i class="fas fa-map-pin"></i> Confirm Location</button>';
@@ -2067,8 +2136,25 @@ function render(){
         else if(current === 'Create password'){
             html += '<div class="input-group"><input type="password" id="pwdInput" placeholder="Create a password" oninput="checkPasswordStrength()" value="'+(regData.password||'')+'"><span class="toggle-pwd" onclick="togglePwd(\'pwdInput\')"><i class="fas fa-eye"></i></span></div><div class="input-group"><input type="password" id="confirmPwdInput" placeholder="Confirm your password" oninput="checkConfirmMatch()" value="'+(regData.password||'')+'"><span class="toggle-pwd" onclick="togglePwd(\'confirmPwdInput\')"><i class="fas fa-eye"></i></span></div><div class="strength-bar"><div class="strength-fill" id="strengthFill"></div></div><div class="strength-text" id="strengthText"></div><div id="matchMsg" style="font-size:12px;margin-top:8px"></div>';
         }
+        else if(current === 'Confirm password'){
+            // This is handled in Create password step above, but kept for flow
+            html += '<div class="input-group"><input type="password" id="confirmPwdInput" placeholder="Confirm your password" oninput="checkConfirmMatch()" value="'+(regData.password||'')+'"><span class="toggle-pwd" onclick="togglePwd(\'confirmPwdInput\')"><i class="fas fa-eye"></i></span></div><div id="matchMsg" style="font-size:12px;margin-top:8px"></div>';
+        }
         else if(current === 'Your preferences'){
-            html += '<div class="subtitle"><i class="fas fa-heart"></i> Select the types of food you love</div><div class="category-grid" id="prefGrid">'+CATEGORIES.slice(0,15).map(function(c){return '<div class="category-chip '+(regData.preferences.categories.indexOf(c)!==-1?'selected':'')+'" onclick="togglePref(\''+c+'\')">'+c+'</div>';}).join('')+'</div><div class="subtitle" style="margin-top:16px"><i class="fas fa-coins"></i> Maximum budget per person?</div><input type="range" id="priceMax" min="0" max="1000" step="50" value="'+regData.preferences.priceMax+'" oninput="updateRange()"><div class="slider-values"><span>₱0</span><span id="priceDisplay">₱'+regData.preferences.priceMax+'</span><span>₱1000+</span></div><div class="subtitle" style="margin-top:16px"><i class="fas fa-road"></i> How far are you willing to travel?</div><input type="range" id="distance" min="1" max="50" step="1" value="'+regData.preferences.maxDistance+'" oninput="updateDist()"><div class="slider-values"><span>1km</span><span id="distDisplay">'+regData.preferences.maxDistance+'km</span><span>50km</span></div>';
+            html += '<div class="subtitle"><i class="fas fa-store"></i> I want to eat from these vendor types</div><div class="category-grid" id="vendorPrefGrid">';
+            html += availableVendorCategories.map(function(c){
+                return '<div class="category-chip '+(regData.preferences.vendorCategories.indexOf(c)!==-1?'selected':'')+'" onclick="toggleVendorPref(\''+c+'\')">'+c+'</div>';
+            }).join('');
+            html += '</div>';
+            html += '<div class="subtitle" style="margin-top:16px"><i class="fas fa-utensils"></i> I want to see these food types</div><div class="category-grid" id="productPrefGrid">';
+            html += availableProductCategories.map(function(c){
+                return '<div class="category-chip '+(regData.preferences.productCategories.indexOf(c)!==-1?'selected':'')+'" onclick="toggleProductPref(\''+c+'\')">'+c+'</div>';
+            }).join('');
+            html += '</div>';
+            html += '<div class="subtitle" style="margin-top:16px"><i class="fas fa-coins"></i> Maximum budget per person?</div>';
+            html += '<input type="range" id="priceMax" min="0" max="1000" step="50" value="'+regData.preferences.priceMax+'" oninput="updateRange()"><div class="slider-values"><span>₱0</span><span id="priceDisplay">₱'+regData.preferences.priceMax+'</span><span>₱1000+</span></div>';
+            html += '<div class="subtitle" style="margin-top:16px"><i class="fas fa-road"></i> How far are you willing to travel?</div>';
+            html += '<input type="range" id="distance" min="1" max="50" step="1" value="'+regData.preferences.maxDistance+'" oninput="updateDist()"><div class="slider-values"><span>1km</span><span id="distDisplay">'+regData.preferences.maxDistance+'km</span><span>50km</span></div>';
         }
         
         if(isLast){
@@ -2078,6 +2164,10 @@ function render(){
         html += '<div class="flex">'+(q>0?'<button class="secondary" onclick="prev()"><i class="fas fa-arrow-left"></i> Back</button>':'')+'<button onclick="next(\''+current+'\')">'+(isLast?'<i class="fas fa-check"></i> Create account':'<i class="fas fa-arrow-right"></i> Continue')+'</button></div></div>';
         c.innerHTML = html;
         
+        if(current === 'Business category' && regData.category){
+            let input = document.getElementById('categoryInput');
+            if(input) input.value = regData.category;
+        }
         if(current === 'Your name' && regData.full_name && !regData.autoGeneratedEmail){
             regData.autoGeneratedEmail = generateAutoEmail(regData.full_name, userRole);
         }
@@ -2085,13 +2175,16 @@ function render(){
             regData.autoGeneratedEmail = generateAutoEmail(regData.business_name, 'vendor');
         }
         if(current === 'Create password' && regData.password){
-            setTimeout(function(){let pwd = document.getElementById('pwdInput'); let confirm = document.getElementById('confirmPwdInput'); if(pwd) pwd.value = regData.password; if(confirm) confirm.value = regData.password; checkPasswordStrength(); checkConfirmMatch();},10);
+            setTimeout(function(){
+                let pwd = document.getElementById('pwdInput');
+                let confirm = document.getElementById('confirmPwdInput');
+                if(pwd) pwd.value = regData.password;
+                if(confirm) confirm.value = regData.password;
+                checkPasswordStrength();
+                checkConfirmMatch();
+            },10);
         }
         if(current === 'Your preferences'){ updateRange(); updateDist(); }
-        if(current === 'Phone number' && regData.phone){
-            let subtitle = document.querySelector('.subtitle');
-            if(subtitle && subtitle.innerHTML.includes('We will send')){ subtitle.innerHTML = '<i class="fas fa-info-circle"></i> We will send a 6-digit code to 0' + regData.phone; }
-        }
     }
     else if(step === 'otp'){
         let displayInfo = contactMethod === 'phone' ? '0' + (regData.phone || '') : regData.email;
@@ -2102,33 +2195,30 @@ function render(){
         if(resetStage === 0){
             c.innerHTML = `
                 <div class="card">
-                    <button class="secondary" style="margin-bottom:16px" onclick="step='login';render()"><i class="fas fa-arrow-left"></i> Back to Login</button>
                     <h2><i class="fas fa-key"></i> Reset Password</h2>
                     <div class="subtitle">Enter your email address or phone number</div>
                     <div class="input-group"><input type="text" id="forgotIdentifier" placeholder="Email or Phone number"></div>
-                    <button onclick="sendForgotOTP()"><i class="fas fa-paper-plane"></i> Send Reset Code</button>
+                    <div class="flex"><button class="secondary" onclick="step='login';render()"><i class="fas fa-arrow-left"></i> Back</button><button onclick="sendResetCode()"><i class="fas fa-paper-plane"></i> Send Code</button></div>
                 </div>
             `;
         } else if(resetStage === 1){
             c.innerHTML = `
                 <div class="card">
-                    <button class="secondary" style="margin-bottom:16px" onclick="resetStage=0;render()"><i class="fas fa-arrow-left"></i> Back</button>
-                    <h2><i class="fas fa-lock"></i> Enter Verification Code</h2>
-                    <div class="subtitle">We sent a 6-digit code to ${forgotEmail || forgotPhone}</div>
+                    <h2><i class="fas fa-lock"></i> Enter Code</h2>
+                    <div class="subtitle">We sent a 6-digit code to ${forgotIdentifier}</div>
                     <div class="otp-box">
                         ${Array(6).fill().map((_,i)=>`<input type="text" maxlength="1" class="otp-input" oninput="moveNextReset(this,${i})" id="resetOtp_${i}">`).join('')}
                     </div>
-                    <button onclick="verifyResetOTP()"><i class="fas fa-check"></i> Verify Code</button>
-                    <button class="secondary" onclick="sendForgotOTP()"><i class="fas fa-redo"></i> Resend Code</button>
+                    <div class="flex"><button class="secondary" onclick="resetStage=0;render()"><i class="fas fa-arrow-left"></i> Back</button><button onclick="verifyResetCode()"><i class="fas fa-check"></i> Verify</button></div>
+                    <button class="tertiary" onclick="sendResetCode()"><i class="fas fa-redo"></i> Resend Code</button>
                 </div>
             `;
             setTimeout(() => { document.getElementById('resetOtp_0')?.focus(); }, 100);
         } else if(resetStage === 2){
             c.innerHTML = `
                 <div class="card">
-                    <button class="secondary" style="margin-bottom:16px" onclick="resetStage=1;render()"><i class="fas fa-arrow-left"></i> Back</button>
-                    <h2><i class="fas fa-lock"></i> Create New Password</h2>
-                    <div class="subtitle">Enter your new password</div>
+                    <h2><i class="fas fa-lock"></i> New Password</h2>
+                    <div class="subtitle">Create your new password</div>
                     <div class="input-group">
                         <input type="password" id="newPassword" placeholder="New password" oninput="checkResetStrength()">
                         <span class="toggle-pwd" onclick="togglePwd('newPassword')"><i class="fas fa-eye"></i></span>
@@ -2140,15 +2230,21 @@ function render(){
                         <span class="toggle-pwd" onclick="togglePwd('confirmPassword')"><i class="fas fa-eye"></i></span>
                     </div>
                     <div id="resetMatchMsg" style="font-size:12px;margin-top:8px"></div>
-                    <button onclick="submitNewPassword()"><i class="fas fa-save"></i> Reset Password</button>
+                    <div class="flex"><button class="secondary" onclick="resetStage=1;render()"><i class="fas fa-arrow-left"></i> Back</button><button onclick="resetPassword()"><i class="fas fa-save"></i> Reset</button></div>
                 </div>
             `;
         }
     }
 }
 
-function openForgotModal(){ step = 'forgot'; resetStage = 0; forgotEmail = ''; forgotPhone = ''; forgotOtp = ''; render(); }
+function selectCategory(cat){ regData.category = cat; render(); }
+function toggleVendorPref(cat){ let idx = regData.preferences.vendorCategories.indexOf(cat); if(idx === -1) regData.preferences.vendorCategories.push(cat); else regData.preferences.vendorCategories.splice(idx,1); render(); }
+function toggleProductPref(cat){ let idx = regData.preferences.productCategories.indexOf(cat); if(idx === -1) regData.preferences.productCategories.push(cat); else regData.preferences.productCategories.splice(idx,1); render(); }
+function updateRange(){ let max = parseInt(document.getElementById('priceMax')?.value||500); regData.preferences.priceMax = max; let d = document.getElementById('priceDisplay'); if(d) d.innerText = '₱'+max; }
+function updateDist(){ let v = parseInt(document.getElementById('distance')?.value||10); regData.preferences.maxDistance = v; let d = document.getElementById('distDisplay'); if(d) d.innerText = v+'km'; }
+function centerOnUserMap(){ if(navigator.geolocation){ navigator.geolocation.getCurrentPosition(function(pos){ if(map) map.setView([pos.coords.latitude, pos.coords.longitude], 16); pinLocation(pos.coords.latitude, pos.coords.longitude); showToast('📍 Location updated'); }, function(){ showToast('Could not get your location'); }); } }
 
+function openForgotModal(){ step = 'forgot'; resetStage = 0; forgotIdentifier = ''; forgotOtp = ''; render(); }
 function moveNextReset(i, idx){ if(i.value.length === 1){ let next = document.getElementById(`resetOtp_${idx+1}`); if(next) next.focus(); } }
 function getResetOTP(){ let otp = ''; for(let i=0; i<6; i++){ otp += document.getElementById(`resetOtp_${i}`)?.value || ''; } return otp; }
 
@@ -2190,7 +2286,7 @@ function checkResetMatch(){
     return false;
 }
 
-async function sendForgotOTP(){
+async function sendResetCode(){
     let identifier = document.getElementById('forgotIdentifier')?.value.trim();
     if(!identifier){ showToast('Enter your email or phone number'); return; }
     
@@ -2209,13 +2305,7 @@ async function sendForgotOTP(){
         hideLoading();
         
         if(res.ok && data.success){
-            if(isPhone){
-                forgotPhone = identifier;
-                forgotEmail = null;
-            } else {
-                forgotEmail = identifier;
-                forgotPhone = null;
-            }
+            forgotIdentifier = identifier;
             resetStage = 1;
             showSuccessToast('Reset code sent! Check your ' + (isPhone ? 'phone' : 'email'));
             render();
@@ -2228,13 +2318,14 @@ async function sendForgotOTP(){
     }
 }
 
-async function verifyResetOTP(){
+async function verifyResetCode(){
     let otp = getResetOTP();
     if(otp.length !== 6){ showToast('Enter 6-digit code'); return; }
     
     showLoading(true, 'Verifying code...');
     
-    let body = forgotEmail ? { email: forgotEmail, otp: otp } : { phone: forgotPhone, otp: otp };
+    let isPhone = /^\d{10,11}$/.test(forgotIdentifier);
+    let body = isPhone ? { phone: forgotIdentifier, otp: otp } : { email: forgotIdentifier, otp: otp };
     
     try {
         let res = await fetch('/api/auth/verify-reset-otp', {
@@ -2258,7 +2349,7 @@ async function verifyResetOTP(){
     }
 }
 
-async function submitNewPassword(){
+async function resetPassword(){
     let newPassword = document.getElementById('newPassword')?.value;
     let confirmPassword = document.getElementById('confirmPassword')?.value;
     
@@ -2277,7 +2368,8 @@ async function submitNewPassword(){
     
     showLoading(true, 'Resetting password...');
     
-    let body = forgotEmail ? { email: forgotEmail, password: newPassword, otp: forgotOtp } : { phone: forgotPhone, password: newPassword, otp: forgotOtp };
+    let isPhone = /^\d{10,11}$/.test(forgotIdentifier);
+    let body = isPhone ? { phone: forgotIdentifier, password: newPassword, otp: forgotOtp } : { email: forgotIdentifier, password: newPassword, otp: forgotOtp };
     
     try {
         let res = await fetch('/api/auth/reset-password', {
@@ -2291,7 +2383,7 @@ async function submitNewPassword(){
         if(res.ok && data.success){
             showSuccessToast('Password reset successfully! Please login with your new password.');
             step = 'login';
-            savedIdentifier = forgotEmail || forgotPhone;
+            savedIdentifier = forgotIdentifier;
             savedPassword = newPassword;
             render();
         } else {
@@ -2303,19 +2395,20 @@ async function submitNewPassword(){
     }
 }
 
-function setContactMethod(method){ contactMethod = method; questions = getQuestions(); q = 0; render(); }
-function selectCategory(cat){ regData.category = cat; render(); }
-function togglePref(cat){ let idx = regData.preferences.categories.indexOf(cat); if(idx === -1) regData.preferences.categories.push(cat); else regData.preferences.categories.splice(idx,1); render(); }
-function updateRange(){ let max = parseInt(document.getElementById('priceMax')?.value||500); regData.preferences.priceMax = max; let d = document.getElementById('priceDisplay'); if(d) d.innerText = '₱'+max; }
-function updateDist(){ let v = parseInt(document.getElementById('distance')?.value||10); regData.preferences.maxDistance = v; let d = document.getElementById('distDisplay'); if(d) d.innerText = v+'km'; }
-function centerOnUserMap(){ if(navigator.geolocation){ navigator.geolocation.getCurrentPosition(function(pos){ if(map) map.setView([pos.coords.latitude, pos.coords.longitude], 16); pinLocation(pos.coords.latitude, pos.coords.longitude); showToast('📍 Location updated'); }, function(){ showToast('Could not get your location'); }); } }
 function prev(){ if(q > 0){ q--; render(); } }
+
+function setContactMethod(method){ 
+    contactMethod = method; 
+    questions = getQuestions(); 
+    q = 0; 
+    render(); 
+}
 
 function next(qName){
     let val = document.getElementById('ans')?.value;
     
     if(qName === 'Phone number'){
-        let cleanVal = val.replace(/^0+/, '');
+        let cleanVal = val ? val.replace(/^0+/, '') : '';
         if(!cleanVal || cleanVal.length < 10 || cleanVal.length > 11){ showToast('Please enter a valid 10-11 digit phone number'); return; }
         regData.phone = cleanVal;
     }
@@ -2349,16 +2442,27 @@ function next(qName){
         regData.autoGeneratedEmail = generateAutoEmail(regData.business_name, 'vendor');
     }
     else if(qName === 'Business category'){
-        if(!regData.category){ showToast('Please select a business category'); return; }
+        let categoryInput = document.getElementById('categoryInput');
+        if(categoryInput){
+            let catVal = categoryInput.value.trim();
+            if(!catVal){ showToast('Please enter or select a business category'); return; }
+            regData.category = catVal;
+        } else {
+            if(!regData.category){ showToast('Please select a business category'); return; }
+        }
     }
     else if(qName === 'Business location'){
         if(!regData.locationConfirmed){ showToast('Please confirm your business location on the map'); return; }
     }
     else if(qName === 'Profile photo'){
-        if(!regData.profilePhoto && !regData.skippedPhoto){ regData.skippedPhoto = true; }
+        if(!regData.profilePhoto && !regData.skippedPhoto){ 
+            regData.skippedPhoto = true; 
+        }
     }
     else if(qName === 'Business logo'){
-        if(!regData.logo && !regData.skippedLogo){ regData.skippedLogo = true; }
+        if(!regData.logo && !regData.skippedLogo){
+            regData.skippedLogo = true;
+        }
     }
     
     if(q < questions.length - 1){
@@ -2547,7 +2651,18 @@ function checkPasswordStrength(){
     let textEl = document.getElementById('strengthText');
     if(fill){ fill.style.width = percent+'%'; fill.style.background = color; }
     if(textEl){ textEl.innerHTML = 'Strength: <span style="color:'+color+'">'+text+'</span>'; }
-    checkConfirmMatch();
+    
+    let confirmPwd = document.getElementById('confirmPwdInput')?.value;
+    let matchMsg = document.getElementById('matchMsg');
+    if(confirmPwd){
+        if(pwd === confirmPwd && pwd.length > 0){
+            matchMsg.innerHTML = '✓ Passwords match';
+            matchMsg.style.color = '#4caf50';
+        } else if(confirmPwd.length > 0){
+            matchMsg.innerHTML = '✗ Passwords do not match';
+            matchMsg.style.color = '#e53935';
+        }
+    }
 }
 
 function checkConfirmMatch(){
@@ -2660,7 +2775,7 @@ function resetReg(){
         user_name: '', category: '', location: {lat: null, lng: null, address: ''}, locationConfirmed: false,
         agreedToEula: false, profilePhoto: null, profilePhotoName: null, skippedPhoto: false,
         logo: null, logoName: null, skippedLogo: false, 
-        preferences: {categories: [], priceMin: 0, priceMax: 500, maxDistance: 10}
+        preferences: {vendorCategories: [], productCategories: [], priceMin: 0, priceMax: 500, maxDistance: 10}
     };
     questions = getQuestions();
     render();
@@ -2669,7 +2784,10 @@ function resetReg(){
 let fa = document.createElement('link'); fa.rel='stylesheet'; fa.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'; document.head.appendChild(fa);
 let leaflet = document.createElement('link'); leaflet.rel='stylesheet'; leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(leaflet);
 let leafletScript = document.createElement('script'); leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; leafletScript.onload=function(){ if(step==='register' && questions[q]==='Business location') setTimeout(initLocationMap,100); }; document.head.appendChild(leafletScript);
-render();
+
+fetchAvailableCategories().then(() => {
+    render();
+});
 </script>
 ''')
 
@@ -6305,6 +6423,20 @@ def reset_password():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/categories/vendors', methods=['GET'])
+def get_categories_with_vendors():
+    result = supabase.table('vendors').select('category').execute()
+    categories = list(set([v['category'] for v in result.data if v.get('category')]))
+    categories.sort()
+    return jsonify({'categories': categories})
+
+@app.route('/api/categories/products', methods=['GET'])
+def get_categories_with_products():
+    result = supabase.table('products').select('category').execute()
+    categories = list(set([p['category'] for p in result.data if p.get('category')]))
+    categories.sort()
+    return jsonify({'categories': categories})
 
 @app.route('/api/auth/register/customer', methods=['POST'])
 def register_customer():
@@ -6394,6 +6526,24 @@ def register_vendor():
     try:
         supabase.table('users').insert(user_data).execute()
         
+        # Insert or update category in categories table
+        if business_category:
+            try:
+                # Check if category already exists
+                existing_category = supabase.table('categories').select('*').eq('name', business_category).execute()
+                if not existing_category.data:
+                    # Insert new category
+                    category_data = {
+                        'id': 0,
+                        'name': business_category
+                    }
+                    supabase.table('categories').insert(category_data).execute()
+                    print(f"✓ Added new category: {business_category}")
+                else:
+                    print(f"✓ Category already exists: {business_category}")
+            except Exception as cat_error:
+                print(f"Note: Could not add to categories table: {cat_error}")
+        
         vendor_id = str(uuid.uuid4())
         vendor_data = {
             'id': vendor_id,
@@ -6420,8 +6570,7 @@ def register_vendor():
         }
         supabase.table('vendors').insert(vendor_data).execute()
         
-        # Send OTP via Brevo and/or TextBee
-        notifications.send_verification_code(email, phone, otp)
+        notifications.send_verification_code(email, phone, otp, user_name)
         
         return jsonify({
             'success': True,
@@ -6430,6 +6579,7 @@ def register_vendor():
             'requires_verification': not is_phone_only
         })
     except Exception as e:
+        print(f"Register vendor error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/auth/verify-otp', methods=['POST'])

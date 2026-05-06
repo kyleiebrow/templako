@@ -52,13 +52,7 @@ def utc_now():
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 print("✓ Supabase connected")
 
-# ============================================
-# NOTIFICATION SERVICE (Brevo Email + TextBee SMS)
-# ============================================
 
-# ============================================
-# NOTIFICATION SERVICE (Brevo Email + TextBee SMS)
-# ============================================
 
 class NotificationService:
     def __init__(self):
@@ -70,54 +64,37 @@ class NotificationService:
         self.textbee_sender_name = TEXTBEE_SENDER_NAME
         self.email_enabled = bool(self.brevo_api_key and self.brevo_sender_email)
         self.sms_enabled = bool(self.textbee_api_key and self.textbee_device_id)
+        self.base_url = "https://templako.onrender.com"
         
-        # TextBee base URL
         self.textbee_base_url = "https://api.textbee.dev/api/v1"
         
         if self.email_enabled:
-            print(f"✓ Brevo email enabled - Sender: {self.brevo_sender_name} <{self.brevo_sender_email}>")
+            print(f"[OK] Brevo email enabled - Sender: {self.brevo_sender_name} <{self.brevo_sender_email}>")
         if self.sms_enabled:
-            print(f"✓ TextBee SMS enabled - Device ID: {self.textbee_device_id}")
-    
-    # ============================================
-    # HELPER: Convert phone to local 09 format
-    # ============================================
+            print(f"[OK] TextBee SMS enabled - Device ID: {self.textbee_device_id}")
     
     def format_phone_for_sms(self, phone_number):
         """Convert any phone format to local 09xxxxxxxxx for SMS sending"""
         if not phone_number:
             return None
         
-        # Convert to string and remove all non-digit characters
         digits = ''.join(filter(str.isdigit, str(phone_number)))
         
-        # Philippine numbers: convert 63 or +63 to 09
         if len(digits) == 12 and digits.startswith('63'):
-            # 639xxxxxxxxxx -> 09xxxxxxxxx
             digits = '0' + digits[2:]
         elif len(digits) == 13 and digits.startswith('63'):
-            # 639xxxxxxxxxx (with extra digit) -> 09xxxxxxxxx
             digits = '0' + digits[2:]
         elif len(digits) == 11 and digits.startswith('09'):
-            # Already correct format
             pass
         elif len(digits) == 10 and digits.startswith('9'):
-            # 9xxxxxxxxx -> 09xxxxxxxxx
             digits = '0' + digits
         elif len(digits) == 10 and digits.startswith('0'):
-            # 0xxxxxxxxx -> add 9? No, keep as is (09xxxxxxxxx is 11 digits)
             pass
         
-        # Ensure we have 11 digits starting with 09
         if len(digits) == 11 and digits.startswith('09'):
             return digits
         else:
-            # Return original if format is unexpected
             return phone_number
-    
-    # ============================================
-    # EMAIL METHODS
-    # ============================================
     
     def send_email(self, to_email, subject, html_content):
         """Send email using Brevo API"""
@@ -147,17 +124,13 @@ class NotificationService:
             )
             success = response.status_code in [200, 201, 202]
             if success:
-                print(f"✓ Email sent to {to_email}")
+                print(f"[OK] Email sent to {to_email}")
             else:
-                print(f"✗ Email failed ({response.status_code}): {response.text}")
+                print(f"[FAIL] Email failed ({response.status_code}): {response.text}")
             return success
         except Exception as e:
             print(f"Brevo error: {e}")
             return False
-    
-    # ============================================
-    # SMS METHODS - WITH LOCAL 09 FORMAT
-    # ============================================
     
     def send_sms(self, phone_number, message):
         """Send SMS using TextBee API - converts to local 09 format"""
@@ -166,12 +139,9 @@ class NotificationService:
             return True
         
         try:
-            # Convert phone number to local 09 format
             local_phone = self.format_phone_for_sms(phone_number)
+            print(f"[PHONE] Conversion: {phone_number} -> {local_phone}")
             
-            print(f"📱 Phone conversion: {phone_number} -> {local_phone}")
-            
-            # CORRECTED: Use the proper TextBee endpoint
             url = f"{self.textbee_base_url}/gateway/devices/{self.textbee_device_id}/send-sms"
             
             response = requests.post(
@@ -189,21 +159,16 @@ class NotificationService:
             
             success = response.status_code == 200
             if success:
-                print(f"✓ SMS sent to {local_phone}")
-                print(f"   Response: {response.json() if response.text else 'OK'}")
+                print(f"[OK] SMS sent to {local_phone}")
             else:
-                print(f"✗ SMS failed ({response.status_code}): {response.text}")
+                print(f"[FAIL] SMS failed ({response.status_code}): {response.text}")
             return success
         except Exception as e:
             print(f"TextBee error: {e}")
             return False
     
-    # ============================================
-    # OTP VERIFICATION (Email + SMS)
-    # ============================================
-    
     def send_verification_code_email(self, email, otp, name=None):
-        """Send OTP via email with dynamic personalization"""
+        """Send OTP via email"""
         display_name = name or "Valued Customer"
         
         html = f"""
@@ -225,12 +190,13 @@ class NotificationService:
                 .expiry {{ color: #6b8c6b; font-size: 13px; text-align: center; margin-top: 15px; }}
                 .footer {{ background: #f8faf8; padding: 20px; text-align: center; font-size: 12px; color: #8ba88b; }}
                 .warning {{ background: #fff3e0; padding: 12px; border-radius: 12px; font-size: 13px; color: #e65100; margin: 20px 0; }}
+                .button {{ display: inline-block; background: #2d8c3c; color: white; text-decoration: none; padding: 12px 24px; border-radius: 30px; margin-top: 20px; }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>🔐 {APP_NAME}</h1>
+                    <h1>[LOCK] {APP_NAME}</h1>
                     <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0;">Verification Code</p>
                 </div>
                 <div class="content">
@@ -239,36 +205,41 @@ class NotificationService:
                     <div class="code-box">
                         <div class="code">{otp}</div>
                     </div>
-                    <div class="expiry">⏰ This code expires in <strong>10 minutes</strong></div>
+                    <div class="expiry">[TIME] This code expires in <strong>10 minutes</strong></div>
+                    <div style="text-align: center;">
+                        <a href="{self.base_url}/auth" class="button">Go to {APP_NAME} →</a>
+                    </div>
                     <div class="warning">
-                        ⚠️ If you didn't request this code, please ignore this email or contact support.
+                        [!] If you didn't request this code, please ignore this email.
                     </div>
                 </div>
                 <div class="footer">
                     <p>{APP_NAME} - GPS Based Vendor Discovery App</p>
-                    <p>📍 Tiaong, Quezon | 🍢 Made with love for local food lovers</p>
-                    <p>© 2026 {APP_NAME}. All rights reserved.</p>
+                    <p>[LOC] Tiaong, Quezon | [FORK] Made for local food lovers</p>
+                    <p>(C) 2026 {APP_NAME}. All rights reserved.</p>
                 </div>
             </div>
         </body>
         </html>
         """
-        return self.send_email(email, f"🔐 Your {APP_NAME} Verification Code", html)
+        return self.send_email(email, f"[LOCK] Your {APP_NAME} Verification Code", html)
     
     def send_verification_code_sms(self, phone, otp, name=None):
-        """Send OTP via SMS with personalization - uses local 09 format"""
+        """Send OTP via SMS"""
         display_name = name or "there"
-        message = f"""🔐 {APP_NAME} Verification Code
+        message = f"""[LOCK] {APP_NAME} Verification Code
 
 Hi {display_name}!
 
 Your verification code is: {otp}
 
-⏰ This code expires in 10 minutes.
+[TIME] This code expires in 10 minutes.
 
-Never share this code with anyone, even if they claim to be from {APP_NAME}.
+Never share this code with anyone.
 
-{APP_NAME} - Find the best street food in Tiaong, Quezon! 🍢"""
+Login: {self.base_url}/auth
+
+{APP_NAME} - Find street food in Tiaong, Quezon! [FORK]"""
         return self.send_sms(phone, message)
     
     def send_verification_code(self, email, phone, otp, name=None):
@@ -283,60 +254,52 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
         
         return results
     
-    # ============================================
-    # WELCOME MESSAGES (Dynamic by role)
-    # ============================================
-    
-    def send_welcome_email(self, email, name, role='customer', business_name=None, vendor_name=None):
-        """Send dynamic welcome email based on role"""
+    def send_welcome_email(self, email, name, role='customer', business_name=None):
+        """Send welcome email based on role"""
         if not email or email.endswith('@lako.customer') or email.endswith('@lako.vendor'):
             return True
         
         if role == 'admin':
-            icon = "👑"
+            icon = "[CROWN]"
             title = "Admin Dashboard"
             display_name = name
             welcome_message = "You have full access to manage users, vendors, and platform analytics!"
             cta_text = "Go to Admin Panel"
-            cta_link = f"{BASE_URL}/admin"
             features = [
-                "📊 View platform statistics",
-                "👥 Manage all users and vendors",
-                "🍽️ Manage vendor products",
-                "⚠️ Suspend/unsuspend accounts",
-                "📈 Monitor platform growth"
+                "[GRAPH] View platform statistics",
+                "[USERS] Manage all users and vendors",
+                "[FORK] Manage vendor products",
+                "[WARN] Suspend accounts",
+                "[LINE] Monitor platform growth"
             ]
             
         elif role == 'customer':
-            icon = "🍢"
+            icon = "[FORK]"
             title = "Food Explorer"
             display_name = name
             welcome_message = "Start exploring street food vendors near you in Tiaong, Quezon!"
             cta_text = "Start Exploring"
-            cta_link = f"{BASE_URL}/customer"
             features = [
-                "📍 Find street food vendors near you",
-                "📋 Browse menus with photos",
-                "⭐ Save your favorite vendors",
-                "🗺️ Get turn-by-turn directions",
-                "📝 Write reviews and rate vendors",
-                "📱 Share your food experiences"
+                "[LOC] Find street food vendors near you",
+                "[LIST] Browse menus with photos",
+                "[STAR] Save your favorite vendors",
+                "[MAP] Get turn-by-turn directions",
+                "[PEN] Write reviews and rate vendors"
             ]
             
-        else:  # vendor
-            icon = "🏪"
+        else:
+            icon = "[STORE]"
             title = "Business Owner"
             display_name = business_name or name
             welcome_message = "Start managing your business and reaching more customers in Tiaong, Quezon!"
             cta_text = "Go to Dashboard"
-            cta_link = f"{BASE_URL}/vendor"
             features = [
-                "📝 Manage your product catalog with photos",
-                "⏰ Set your operating hours",
-                "📊 Track customer traffic and analytics",
-                "⭐ Respond to customer reviews",
-                "📢 Create posts to engage customers",
-                "📍 Update your business location"
+                "[PEN] Manage your product catalog with photos",
+                "[TIME] Set your operating hours",
+                "[GRAPH] Track customer traffic and analytics",
+                "[STAR] Respond to customer reviews",
+                "[NEWS] Create posts to engage customers",
+                "[LOC] Update your business location"
             ]
         
         html = f"""
@@ -347,7 +310,7 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Welcome to {APP_NAME}</title>
             <style>
-                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f5faf5; }}
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5faf5; }}
                 .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 28px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.1); }}
                 .header {{ background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 40px 30px; text-align: center; }}
                 .header .icon {{ font-size: 64px; margin-bottom: 10px; }}
@@ -364,8 +327,6 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
                 .features li::before {{ content: "✓"; background: #2d8c3c; color: white; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }}
                 .cta-button {{ display: inline-block; background: linear-gradient(135deg, #2d8c3c, #1a6b28); color: white; text-decoration: none; padding: 14px 32px; border-radius: 48px; font-weight: 600; margin: 20px 0; text-align: center; }}
                 .footer {{ background: #f8faf8; padding: 20px; text-align: center; font-size: 12px; color: #8ba88b; border-top: 1px solid #e8ece8; }}
-                .social {{ margin-top: 15px; }}
-                .social a {{ color: #2d8c3c; text-decoration: none; margin: 0 10px; }}
             </style>
         </head>
         <body>
@@ -376,16 +337,16 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
                     <p>{title}</p>
                 </div>
                 <div class="content">
-                    <div class="greeting">Hello, {display_name}! 🎉</div>
+                    <div class="greeting">Hello, {display_name}! [PARTY]</div>
                     <div class="message">{welcome_message}</div>
                     <div class="features">
-                        <h3>✨ What you can do:</h3>
+                        <h3>[STAR] What you can do:</h3>
                         <ul>
                             {''.join(f'<li>{feature}</li>' for feature in features)}
                         </ul>
                     </div>
                     <div style="text-align: center;">
-                        <a href="{cta_link}" class="cta-button">{cta_text} →</a>
+                        <a href="{self.base_url}/auth" class="cta-button">{cta_text} →</a>
                     </div>
                     <p style="font-size: 13px; color: #6b8c6b; text-align: center; margin-top: 20px;">
                         Need help? Contact us at <a href="mailto:support@{APP_NAME.lower()}.app" style="color: #2d8c3c;">support@{APP_NAME.lower()}.app</a>
@@ -393,217 +354,133 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
                 </div>
                 <div class="footer">
                     <p><strong>{APP_NAME}</strong> - GPS Based Vendor Discovery App</p>
-                    <p>📍 Tiaong, Quezon | 🍢 Made with love for local food lovers</p>
-                    <div class="social">
-                        <a href="#">📱 Download App</a> | <a href="#">💬 Support</a> | <a href="#">📧 Contact</a>
-                    </div>
-                    <p style="margin-top: 15px;">© 2026 {APP_NAME}. All rights reserved.</p>
+                    <p>[LOC] Tiaong, Quezon | [FORK] Made for local food lovers</p>
+                    <p>(C) 2026 {APP_NAME}. All rights reserved.</p>
                 </div>
             </div>
         </body>
         </html>
         """
-        return self.send_email(email, f"🎉 Welcome to {APP_NAME}, {display_name}!", html)
+        return self.send_email(email, f"[PARTY] Welcome to {APP_NAME}, {display_name}!", html)
     
     def send_welcome_sms(self, phone, name, role='customer', business_name=None):
-        """Send dynamic welcome SMS based on role - uses local 09 format"""
+        """Send welcome SMS based on role"""
         if not phone:
             return True
         
         if role == 'admin':
-            message = f"""🎉 Welcome to {APP_NAME} Admin Panel, {name}!
+            message = f"""[PARTY] Welcome to {APP_NAME} Admin Panel, {name}!
 
-You now have full administrative access to manage users, vendors, and platform analytics.
+You now have full administrative access.
 
-📊 Admin Dashboard: {BASE_URL}/admin
+[GRAPH] Admin Login: {self.base_url}/auth
 
 {APP_NAME} - Platform Administrator"""
             
         elif role == 'customer':
-            message = f"""🎉 Welcome to {APP_NAME}, {name}! 🍢
+            message = f"""[PARTY] Welcome to {APP_NAME}, {name}! [FORK]
 
-Start exploring street food vendors near you in Tiaong, Quezon!
+Start exploring street food vendors near you!
 
-✨ What you can do:
-• Find vendors near you
-• Browse menus
-• Save favorites
-• Get directions
+[STAR] What you can do:
+[LOC] Find vendors near you
+[LIST] Browse menus
+[STAR] Save favorites
+[MAP] Get directions
 
-📍 Download the app: {BASE_URL}/customer
+Get started: {self.base_url}/auth
 
 {APP_NAME} - Find the best street food in Tiaong!"""
             
-        else:  # vendor
+        else:
             display_name = business_name or name
-            message = f"""🎉 Welcome to {APP_NAME}, {display_name}! 🏪
+            message = f"""[PARTY] Welcome to {APP_NAME}, {display_name}! [STORE]
 
 Your business is now live on {APP_NAME}!
 
-✨ What you can do:
-• Add your menu items with photos
-• Set your operating hours
-• Track customer analytics
-• Create posts to engage customers
+[STAR] What you can do:
+[PEN] Add menu items with photos
+[TIME] Set operating hours
+[GRAPH] Track customer analytics
+[NEWS] Create posts to engage customers
 
-📊 Vendor Dashboard: {BASE_URL}/vendor
+Vendor login: {self.base_url}/auth
 
 {APP_NAME} - Grow your food business in Tiaong!"""
         
         return self.send_sms(phone, message)
     
-    # ============================================
-    # PASSWORD RESET
-    # ============================================
-    
-    def send_password_reset_email(self, email, reset_token, name=None):
-        """Send password reset email"""
+    def send_password_reset_otp_email(self, email, otp, name=None):
+        """Send password reset OTP via email"""
         display_name = name or "User"
-        reset_link = f"{BASE_URL}/reset-password?token={reset_token}"
         
         html = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Password Reset - {APP_NAME}</title>
             <style>
                 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
-                .container {{ max-width: 500px; margin: 0 auto; background: white; border-radius: 20px; overflow: hidden; }}
-                .header {{ background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 30px; text-align: center; }}
-                .header h1 {{ color: white; margin: 0; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+                .header {{ background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 30px 20px; text-align: center; }}
+                .header h1 {{ color: white; margin: 0; font-size: 28px; }}
                 .content {{ padding: 30px; }}
-                .button {{ display: inline-block; background: #2d8c3c; color: white; text-decoration: none; padding: 12px 30px; border-radius: 30px; margin: 20px 0; }}
-                .warning {{ background: #fff3e0; padding: 15px; border-radius: 12px; font-size: 13px; margin-top: 20px; }}
+                .greeting {{ font-size: 18px; color: #1a2e1a; margin-bottom: 20px; }}
+                .code-box {{ background: #f5faf5; border-radius: 16px; padding: 25px; text-align: center; margin: 20px 0; border: 2px dashed #2d8c3c; }}
+                .code {{ font-size: 42px; font-weight: bold; letter-spacing: 8px; color: #2d8c3c; font-family: monospace; }}
+                .expiry {{ color: #6b8c6b; font-size: 13px; text-align: center; margin-top: 15px; }}
+                .warning {{ background: #fff3e0; padding: 12px; border-radius: 12px; font-size: 13px; color: #e65100; margin: 20px 0; }}
+                .button {{ display: inline-block; background: #2d8c3c; color: white; text-decoration: none; padding: 12px 24px; border-radius: 30px; margin-top: 20px; }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>🔐 {APP_NAME}</h1>
-                    <p style="color: rgba(255,255,255,0.9);">Password Reset</p>
+                    <h1>[LOCK] {APP_NAME}</h1>
+                    <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0;">Password Reset</p>
                 </div>
                 <div class="content">
-                    <p>Hello {display_name},</p>
-                    <p>We received a request to reset your {APP_NAME} account password.</p>
-                    <div style="text-align: center;">
-                        <a href="{reset_link}" class="button">Reset Password</a>
+                    <div class="greeting">Hello {display_name},</div>
+                    <p>We received a request to reset your {APP_NAME} password. Use the code below to proceed.</p>
+                    
+                    <div class="code-box">
+                        <div class="code">{otp}</div>
                     </div>
-                    <p>This link will expire in <strong>1 hour</strong>.</p>
+
+                    <div class="expiry">[TIME] This code expires in <strong>10 minutes</strong></div>
+                    
+                    <div style="text-align: center;">
+                        <a href="{self.base_url}/auth" class="button">Go to {APP_NAME} →</a>
+                    </div>
+
                     <div class="warning">
-                        ⚠️ If you didn't request a password reset, please ignore this email or contact support.
+                        [!] If you didn't request this, please ignore this email.
                     </div>
                 </div>
             </div>
         </body>
         </html>
         """
-        return self.send_email(email, f"🔐 Reset Your {APP_NAME} Password", html)
+        return self.send_email(email, f"[LOCK] Reset Your {APP_NAME} Password", html)
     
     def send_password_reset_sms(self, phone, reset_token):
-        """Send password reset SMS with link - uses local 09 format"""
-        reset_link = f"{BASE_URL}/reset-password?token={reset_token}"
-        message = f"""🔐 {APP_NAME} Password Reset
+        """Send password reset SMS with link"""
+        reset_link = f"{self.base_url}/auth"
+        message = f"""[LOCK] {APP_NAME} Password Reset
 
 We received a request to reset your password.
 
 Click this link to reset your password:
 {reset_link}
 
-⏰ This link expires in 1 hour.
+[TIME] This link expires in 1 hour.
 
 If you didn't request this, please ignore this message.
 
 {APP_NAME} - Security Notice"""
         return self.send_sms(phone, message)
-    
-    # ============================================
-    # ORDER/PURCHASE NOTIFICATIONS (For future use)
-    # ============================================
-    
-    def send_order_confirmation_email(self, email, order_details, customer_name):
-        """Send order confirmation email"""
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>Order Confirmation - {APP_NAME}</title>
-        </head>
-        <body>
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <div style="background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 20px; text-align: center;">
-                    <h1 style="color: white;">✅ Order Confirmed!</h1>
-                </div>
-                <div style="padding: 30px;">
-                    <h2>Hello {customer_name},</h2>
-                    <p>Your order has been confirmed!</p>
-                    <div style="background: #f5faf5; padding: 20px; border-radius: 12px;">
-                        <strong>Order Details:</strong>
-                        <pre style="margin-top: 10px;">{order_details}</pre>
-                    </div>
-                    <p>Thank you for ordering through {APP_NAME}!</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        return self.send_email(email, f"✅ Order Confirmed - {APP_NAME}", html)
-    
-    def send_order_notification_sms(self, phone, order_summary, customer_name):
-        """Send order notification SMS to vendor - uses local 09 format"""
-        message = f"""🛒 New Order from {customer_name}!
-
-Order Summary: {order_summary}
-
-Log in to your {APP_NAME} vendor dashboard to manage this order.
-
-{APP_NAME} Vendor Portal: {BASE_URL}/vendor"""
-        return self.send_sms(phone, message)
-    
-    # ============================================
-    # PROMOTIONAL / BULK MESSAGES
-    # ============================================
-    
-    def send_promotional_email(self, email, name, title, message_content, cta_text, cta_link):
-        """Send promotional email to users"""
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>{title} - {APP_NAME}</title>
-        </head>
-        <body>
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <div style="background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 30px; text-align: center;">
-                    <h1 style="color: white;">{APP_NAME}</h1>
-                </div>
-                <div style="padding: 30px;">
-                    <h2>Hello {name}!</h2>
-                    <p>{message_content}</p>
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="{cta_link}" style="background: #2d8c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px;">{cta_text}</a>
-                    </div>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        return self.send_email(email, f"📢 {title}", html)
-    
-    def send_promotional_sms(self, phone, name, message_content):
-        """Send promotional SMS to users - uses local 09 format"""
-        message = f"""📢 Hey {name}!
-
-{message_content}
-
-{APP_NAME} - {BASE_URL}"""
-        return self.send_sms(phone, message)
-    
-    # ============================================
-    # ACCOUNT NOTIFICATIONS
-    # ============================================
     
     def send_account_suspended_email(self, email, name, reason=None):
         """Notify user that their account has been suspended"""
@@ -619,30 +496,34 @@ Log in to your {APP_NAME} vendor dashboard to manage this order.
         <body>
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <div style="background: #e53935; padding: 20px; text-align: center;">
-                    <h1 style="color: white;">⚠️ Account Suspended</h1>
+                    <h1 style="color: white;">[WARN] Account Suspended</h1>
                 </div>
                 <div style="padding: 30px;">
                     <h2>Hello {name},</h2>
                     <p>Your {APP_NAME} account has been suspended due to {reason_text}.</p>
                     <p>If you believe this is a mistake, please contact our support team.</p>
                     <p>Email: <a href="mailto:support@{APP_NAME.lower()}.app">support@{APP_NAME.lower()}.app</a></p>
+                    <div style="text-align: center; margin-top: 30px;">
+                        <a href="{self.base_url}/auth" style="background: #2d8c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px;">Contact Support →</a>
+                    </div>
                 </div>
             </div>
         </body>
         </html>
         """
-        return self.send_email(email, f"⚠️ Your {APP_NAME} Account Has Been Suspended", html)
+        return self.send_email(email, f"[WARN] Your {APP_NAME} Account Has Been Suspended", html)
     
     def send_account_suspended_sms(self, phone, name):
-        """Notify user via SMS about suspension - uses local 09 format"""
-        message = f"""⚠️ {APP_NAME} Account Alert
+        """Notify user via SMS about suspension"""
+        message = f"""[WARN] {APP_NAME} Account Alert
 
-Hello {name}, your account has been suspended due to a policy violation.
+Hello {name}, your account has been suspended.
 
 Please contact support for more information: support@{APP_NAME.lower()}.app
 
 {APP_NAME} Team"""
         return self.send_sms(phone, message)
+
 
 # Initialize notification service
 notifications = NotificationService()
@@ -3339,6 +3220,8 @@ body{background:#f5f8f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .product-info{padding:10px}
 .product-name{font-size:13px;font-weight:600}
 .product-price{font-size:14px;font-weight:700;color:#3a7b4d}
+.price-tiers{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.price-tier-badge{background:#eff3ef;border-radius:12px;padding:2px 8px;font-size:10px;color:#4a5e4a}
 .modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
 .modal.show{display:flex}
 .modal-content{background:white;border-radius:24px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:20px}
@@ -3403,6 +3286,12 @@ body{background:#f5f8f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .address-search-container{display:flex;gap:8px;margin-bottom:12px}
 .address-search-container input{flex:1;padding:10px 14px;border:1px solid #e0e8e0;border-radius:30px;font-size:14px}
 .address-search-container button{background:#3a7b4d;color:white;border:none;padding:10px 16px;border-radius:30px;cursor:pointer}
+.menu-item-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #e8ece8;cursor:pointer}
+.menu-item-name{font-weight:500;font-size:14px}
+.menu-item-price{font-weight:700;color:#3a7b4d}
+.tier-options{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.tier-option{background:#f0f4f0;border-radius:20px;padding:4px 12px;font-size:11px;cursor:pointer}
+.tier-option.selected{background:#3a7b4d;color:white}
 </style>
 
 <div class="app-bar">
@@ -4202,11 +4091,17 @@ function productCard(p) {
         else if (p.images[0].thumbnail) imageUrl = p.images[0].thumbnail;
     }
     
+    let priceDisplay = `<div class="product-price">P${p.price}</div>`;
+    
+    if (p.priceTiers && p.priceTiers.length > 0) {
+        priceDisplay = `<div class="price-tiers">${p.priceTiers.slice(0,3).map(t => `<span class="price-tier-badge">${escapeHtml(t.name)}: P${t.price}</span>`).join('')}</div><div class="product-price mt-1">From P${p.price}</div>`;
+    }
+    
     return `<div class="product-card" onclick="showProductAndVendor('${p.id}', '${p.vendor?.id}')">
         <div class="product-image">${imageUrl ? `<img src="${imageUrl}">` : '<i class="fas fa-utensils" style="font-size:32px;color:#8da38d"></i>'}</div>
         <div class="product-info">
             <div class="product-name">${escapeHtml(p.name)}</div>
-            <div class="product-price">P${p.price}</div>
+            ${priceDisplay}
             <div class="text-secondary" style="font-size:10px">${escapeHtml(p.vendor?.business_name || '')}</div>
         </div>
     </div>`;
@@ -4216,7 +4111,6 @@ function showProductAndVendor(productId, vendorId) {
     let product = allProducts.find(p => p.id == productId);
     if(product) {
         recordProductVisit(productId, product.name, vendorId, product.category);
-        showToast(`${product.name} - P${product.price}`);
         if(vendorId) showVendorModal(vendorId);
     }
 }
@@ -4241,11 +4135,53 @@ async function showVendorModal(vendorId) {
         <div class="text-secondary">${escapeHtml(v.category)} • ${Math.round(v.distance) || '?'}m away</div>
         <div class="stars mt-1">${'★'.repeat(Math.floor(v.rating||0))} (${v.review_count||0} reviews)</div>
         <div class="mt-3"><strong>Menu</strong></div>
-        ${products.map(p => `<div class="flex justify-between items-center py-2 border-b cursor-pointer" onclick="showProductAndVendor('${p.id}', '${v.id}')"><div>${escapeHtml(p.name)}</div><div class="product-price">P${p.price}</div></div>`).join('') || '<div class="text-secondary">No menu items yet</div>'}
+        ${products.map(p => `
+            <div class="menu-item-row" onclick="showProductDetail('${p.id}', '${v.id}')">
+                <div>
+                    <div class="menu-item-name">${escapeHtml(p.name)}</div>
+                    ${p.description ? `<div class="text-secondary" style="font-size:11px">${escapeHtml(p.description.substring(0,50))}</div>` : ''}
+                    ${p.priceTiers && p.priceTiers.length > 0 ? `<div class="tier-options">${p.priceTiers.map(t => `<span class="tier-option">${escapeHtml(t.name)}: P${t.price}</span>`).join('')}</div>` : `<div class="menu-item-price">P${p.price}</div>`}
+                </div>
+            </div>
+        `).join('') || '<div class="text-secondary">No menu items yet</div>'}
         <button class="btn-outline mt-3" onclick="openReviewModal('${v.id}')">Write a Review</button>
         <div id="reviewsList" class="mt-3"></div>`;
     document.getElementById('vendorModal').classList.add('show');
     loadVendorReviews(vendorId);
+}
+
+function showProductDetail(productId, vendorId) {
+    let product = allProducts.find(p => p.id == productId);
+    if(!product) return;
+    
+    recordProductVisit(productId, product.name, vendorId, product.category);
+    
+    let priceHtml = `<div class="menu-item-price">P${product.price}</div>`;
+    if (product.priceTiers && product.priceTiers.length > 0) {
+        priceHtml = `<div class="tier-options">${product.priceTiers.map(t => `<div class="tier-option" onclick="event.stopPropagation(); showToast('${escapeHtml(t.name)}: P${t.price}')">${escapeHtml(t.name)}: P${t.price}</div>`).join('')}</div>`;
+    }
+    
+    let imageUrl = '';
+    if (product.images && product.images.length > 0) {
+        if (typeof product.images[0] === 'string') imageUrl = product.images[0];
+        else if (product.images[0].thumbnail) imageUrl = product.images[0].thumbnail;
+    }
+    
+    let modalHtml = `
+        <div class="text-center">
+            <div class="product-image" style="width:100%;height:180px;margin-bottom:12px">${imageUrl ? `<img src="${imageUrl}" style="width:100%;height:100%;object-fit:cover">` : '<i class="fas fa-utensils" style="font-size:48px;color:#8da38d;line-height:180px"></i>'}</div>
+            <h3>${escapeHtml(product.name)}</h3>
+            ${product.description ? `<p class="text-secondary mt-1">${escapeHtml(product.description)}</p>` : ''}
+            <div class="mt-3">
+                <strong>Price Options:</strong>
+                ${priceHtml}
+            </div>
+            <button class="btn-outline btn-sm mt-3" onclick="closeModal(); showVendorModal('${vendorId}')">Back to Menu</button>
+        </div>
+    `;
+    
+    document.getElementById('modalBody').innerHTML = modalHtml;
+    document.getElementById('modalTitle').innerHTML = escapeHtml(product.name);
 }
 
 async function loadVendorReviews(vendorId) {
@@ -4367,8 +4303,11 @@ async function likePost(postId, btn) {
     if (res && res.success) {
         if (res.liked) btn.classList.add('liked');
         else btn.classList.remove('liked');
-        await loadFeed();
-        if (page === 'feed') showFeed();
+        let likeCount = btn.querySelector('i').nextSibling;
+        if (likeCount) {
+            let current = parseInt(likeCount.textContent) || 0;
+            likeCount.textContent = ' ' + (res.liked ? current + 1 : current - 1);
+        }
     }
 }
 
@@ -4769,7 +4708,6 @@ function showAnalytics() {
 
 function confirmLogout() { if(confirm('Logout from Lako?')) { if(watchId) navigator.geolocation.clearWatch(watchId); localStorage.clear(); window.location.href = '/'; } }
 
-// Load Leaflet and Routing Machine
 (function loadLeaflet() {
     if(document.querySelector('link[href*="leaflet.css"]')) return;
     let leafletCSS = document.createElement('link');
@@ -4803,7 +4741,6 @@ function confirmLogout() { if(confirm('Logout from Lako?')) { if(watchId) naviga
     document.head.appendChild(leafletScript);
 })();
 
-// Initialize location and load data
 initLocation();
 </script>
 ''')
@@ -4812,83 +4749,116 @@ VENDOR_DASH = render_page("Vendor Dashboard", '''
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#f5f8f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-.app-bar{background:white;padding:14px 20px;display:flex;gap:16px;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100}
-.back-btn{background:#eff3ef;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#3a7b4d}
-.back-btn:active{transform:scale(0.95)}
-.app-bar-title{font-size:18px;font-weight:600;color:#2c3e2c;flex:1}
-.menu-btn{background:#eff3ef;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#3a7b4d}
-.content{padding:20px 16px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:90px}
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:8px 16px 22px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;z-index:99}
+.app-bar{background:white;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e8ece8;position:sticky;top:0;z-index:100}
+.app-bar-left{display:flex;align-items:center;gap:12px}
+.app-bar-title{font-size:20px;font-weight:700;color:#2c3e2c}
+.app-bar-subtitle{font-size:11px;color:#8da38d;margin-top:2px}
+.app-bar-right{display:flex;gap:12px}
+.icon-btn{background:#eff3ef;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;color:#3a7b4d;display:flex;align-items:center;justify-content:center}
+.content{padding:20px 16px;max-width:500px;margin:0 auto;min-height:calc(100vh - 140px);padding-bottom:90px;position:relative;z-index:1}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:8px 16px 22px;border-top:1px solid #e8ece8;max-width:500px;margin:0 auto;z-index:100}
 .nav-item{display:flex;flex-direction:column;align-items:center;gap:5px;color:#9aae9a;font-size:11px;cursor:pointer}
 .nav-item i{font-size:22px}
 .nav-item.active{color:#3a7b4d}
-.nav-item span{font-size:11px;font-weight:500}
-.card{background:white;border-radius:24px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #edf2ed}
-.btn{width:100%;padding:14px;background:#3a7b4d;color:white;border:none;border-radius:44px;font-size:15px;font-weight:600;cursor:pointer}
-.btn:active{transform:scale(0.97);background:#2e6640}
-.btn-outline{background:white;border:1.5px solid #3a7b4d;color:#3a7b4d;padding:12px;border-radius:44px;font-size:14px;font-weight:500;cursor:pointer}
-.btn-outline:active{background:#f0f6f0}
-.btn-sm{padding:8px 18px;font-size:13px;width:auto}
-.badge{background:#eff6ef;padding:4px 14px;border-radius:30px;font-size:12px;color:#3a7b4d}
-.text-secondary{color:#8da38d;font-size:13px}
+.card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.03);border:1px solid #eef2ee}
+.card-clickable{cursor:pointer}
+.btn{width:100%;padding:12px;background:#3a7b4d;color:white;border:none;border-radius:30px;font-size:15px;font-weight:600;cursor:pointer}
+.btn:active{transform:scale(0.97)}
+.btn-outline{background:white;border:1px solid #3a7b4d;color:#3a7b4d;padding:10px;border-radius:30px;font-size:14px;font-weight:500;cursor:pointer}
+.btn-sm{padding:6px 14px;font-size:13px;width:auto}
+.btn-danger{background:#e53935;color:white;border:none}
+.text-secondary{color:#8da38d;font-size:12px}
 .text-center{text-align:center}
-.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}
-.flex{display:flex}.justify-between{justify-content:space-between}.items-center{align-items:center}.gap-2{gap:8px}.gap-3{gap:12px}
+.flex{display:flex}
+.justify-between{justify-content:space-between}
+.items-center{align-items:center}
+.gap-2{gap:8px}
+.gap-3{gap:12px}
+.mt-2{margin-top:8px}
+.mt-3{margin-top:12px}
+.mb-2{margin-bottom:8px}
+.avatar-lg{width:100px;height:100px;border-radius:50%;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a7b4d,#2e6640);color:white;font-size:42px;object-fit:cover;cursor:pointer}
 .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px}
-.stat-card{background:linear-gradient(145deg,#ffffff,#f8fbf8);border-radius:24px;padding:18px 12px;text-align:center;border:1px solid rgba(58,123,77,0.1)}
-.stat-value{font-size:32px;font-weight:800;color:#3a7b4d}
-.stat-label{font-size:12px;color:#8da38d;margin-top:6px}
-.product-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;border:1px solid #edf2ed}
-.product-price{font-size:20px;font-weight:700;color:#3a7b4d}
-.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f4f7f4}
+.stat-card{background:#f8faf8;padding:12px;border-radius:16px;text-align:center}
+.stat-value{font-size:24px;font-weight:800;color:#3a7b4d}
+.stat-label{font-size:11px;color:#8da38d;margin-top:4px}
+.info-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #e8ece8}
+.info-row:last-child{border-bottom:none}
+.info-icon{width:32px;color:#3a7b4d;font-size:16px}
+.info-text{flex:1;font-size:13px;color:#2c3e2c}
+.info-label{font-size:11px;color:#8da38d}
+.button-group{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.button-group .btn-outline{flex:1;text-align:center}
+.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.image-thumb{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0f4f0}
 .image-thumb img{width:100%;height:100%;object-fit:cover}
-.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px}
 .modal.show{display:flex}
-.modal-content{background:white;border-radius:28px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:24px}
-.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:20px;font-weight:700;color:#2c3e2c}
-.modal-close{font-size:28px;cursor:pointer;color:#9aae9a;padding:8px}
-.hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s;padding:60px 20px}
+.modal-content{background:white;border-radius:24px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;padding:20px}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-weight:700;padding-bottom:12px;border-bottom:1px solid #e8ece8}
+.modal-close{font-size:24px;cursor:pointer;color:#8ba88b;padding:8px}
+.input{width:100%;padding:12px 14px;border:1px solid #e0e8e0;border-radius:14px;font-size:14px;margin-bottom:12px;background:#f8faf8}
+.badge{background:#f0f4f0;padding:4px 10px;border-radius:20px;font-size:11px;color:#4a5e4a}
+.toast{position:fixed;bottom:80px;left:20px;right:20px;background:#2c3e2c;color:white;padding:12px;border-radius:30px;text-align:center;z-index:1000;font-size:13px;animation:fadeInUp 0.3s}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.hamburger-menu{position:fixed;top:0;right:-280px;width:280px;height:100vh;background:white;z-index:200;box-shadow:-2px 0 10px rgba(0,0,0,0.1);transition:right 0.3s ease;padding:60px 20px}
 .hamburger-menu.show{right:0}
 .close-hamburger{position:absolute;top:20px;right:20px;background:#eff3ef;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#3a7b4d}
-.menu-item{padding:14px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;border-radius:16px;font-size:15px}
-.menu-item:active{background:#eff3ef}
-.menu-divider{height:1px;background:#edf2ed;margin:12px 0}
-.toast{position:fixed;bottom:90px;left:20px;right:20px;background:#2c3e2c;color:white;padding:14px 20px;border-radius:60px;text-align:center;z-index:1000;animation:fadeInUp 0.3s}
-@keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-.input{width:100%;padding:14px 16px;border:1.5px solid #e3eae3;border-radius:16px;font-size:15px;margin-bottom:12px;background:#fefefe}
-.input:focus{outline:none;border-color:#3a7b4d}
-.product-images-container{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
-.image-preview{position:relative;width:80px;height:80px}
-.image-preview img{width:100%;height:100%;border-radius:12px;object-fit:cover;border:1px solid #edf2ed}
-.remove-img{position:absolute;top:-8px;right:-8px;background:#e57373;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer}
-.open-toggle{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#fafdfa;border-radius:30px;margin-bottom:20px;border:1px solid #e3eae3}
-.toggle-switch{position:relative;display:inline-block;width:52px;height:26px}
+.menu-item{padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:12px}
+.menu-divider{height:1px;background:#e8ece8;margin:12px 0}
+.product-card{background:white;border-radius:16px;padding:12px;margin-bottom:12px;border:1px solid #eef2ee}
+.product-price{font-size:16px;font-weight:700;color:#3a7b4d}
+.post-card{background:white;border-radius:16px;padding:12px;margin-bottom:12px;border:1px solid #eef2ee}
+.post-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.post-avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3a7b4d,#2e6640);display:flex;align-items:center;justify-content:center;color:white;font-size:18px}
+.post-stats{display:flex;gap:16px;margin-top:8px;padding-top:8px;border-top:1px solid #e8ece8}
+.post-stats span{font-size:12px;color:#8da38d}
+.upload-area{background:#f8faf8;border:2px dashed #c0d0c0;border-radius:16px;padding:16px;text-align:center;cursor:pointer;margin:12px 0}
+.upload-area i{font-size:28px;color:#3a7b4d;margin-bottom:8px;display:block}
+.product-images-container{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.image-preview{position:relative;width:70px;height:70px}
+.image-preview img{width:100%;height:100%;border-radius:10px;object-fit:cover;border:1px solid #e8ece8}
+.remove-img{position:absolute;top:-6px;right:-6px;background:#e53935;color:white;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:10px;cursor:pointer}
+.open-toggle{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#f8faf8;border-radius:30px;margin-bottom:16px;border:1px solid #e8ece8}
+.toggle-switch{position:relative;display:inline-block;width:50px;height:24px}
 .toggle-switch input{opacity:0;width:0;height:0}
-.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#d0dfd0;transition:0.3s;border-radius:26px}
-.slider:before{position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;background-color:white;border-radius:50%}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#d0dfd0;transition:0.3s;border-radius:24px}
+.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background-color:white;border-radius:50%}
 input:checked+.slider{background-color:#3a7b4d}
 input:checked+.slider:before{transform:translateX(26px)}
-.open-status{display:inline-block;padding:5px 14px;border-radius:30px;font-size:12px;font-weight:600}
+.open-status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600}
 .open-status.open{background:#e3f5e3;color:#3a7b4d}
 .open-status.closed{background:#ffe8e6;color:#e57373}
-.post-card{background:white;border-radius:20px;padding:16px;margin-bottom:12px;border:1px solid #edf2ed}
-.post-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.post-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3a7b4d,#2e6640);display:flex;align-items:center;justify-content:center;color:white;font-size:20px}
-.post-stats{display:flex;gap:18px;margin-top:8px;padding-top:8px;border-top:1px solid #edf2ed}
-.post-stats span{font-size:12px;color:#9aae9a}
-.upload-area{background:#fafdfa;border:2px dashed #cde0cd;border-radius:20px;padding:20px;text-align:center;cursor:pointer;margin:12px 0}
-.upload-area i{font-size:32px;color:#3a7b4d;margin-bottom:10px;display:block}
-.confirm-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px}
-.confirm-content{background:white;border-radius:28px;max-width:320px;width:100%;padding:24px;text-align:center}
-.confirm-buttons{display:flex;gap:12px;margin-top:16px}
-.heatmap-container{height:180px;background:#eef2ee;border-radius:24px;margin:16px 0;display:flex;align-items:center;justify-content:center}
+.hours-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
+.hours-item{display:flex;justify-content:space-between;padding:8px 12px;background:#f8faf8;border-radius:12px;font-size:12px}
+.stars{color:#f5b042;font-size:12px;letter-spacing:1px}
+.heatmap-container{height:160px;background:#f8faf8;border-radius:16px;margin:16px 0;display:flex;align-items:center;justify-content:center;border:1px solid #e8ece8}
+.price-tier-item{background:#f8faf8;border-radius:12px;padding:12px;margin-bottom:8px}
+.price-tier-row{display:flex;gap:8px;align-items:center}
+.price-tier-row input{flex:1;margin-bottom:0}
+.remove-tier{background:#e53935;color:white;border:none;width:32px;height:32px;border-radius:8px;cursor:pointer}
+.add-tier-btn{background:#3a7b4d;color:white;border:none;padding:10px;border-radius:30px;margin-top:8px;width:100%;cursor:pointer}
+.disabled-input{background:#f0f0f0;color:#999;cursor:not-allowed}
+.price-note{font-size:11px;color:#8da38d;margin-top:8px;padding:8px;background:#f8faf8;border-radius:8px}
+.tier-type-selector{display:flex;gap:10px;margin-bottom:16px}
+.tier-type-btn{flex:1;padding:8px;background:#f8faf8;border:1px solid #e0e8e0;border-radius:30px;cursor:pointer;text-align:center;font-size:13px}
+.tier-type-btn.active{background:#3a7b4d;color:white;border-color:#3a7b4d}
+.location-permission-toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2c3e2c;color:white;padding:20px;border-radius:20px;text-align:center;z-index:2000;max-width:90%;width:300px}
+.location-permission-toast button{background:#3a7b4d;color:white;border:none;padding:10px;border-radius:30px;margin-top:10px;cursor:pointer;width:100%}
+.location-permission-toast button.secondary{background:#6c757d}
 </style>
 
 <div class="app-bar">
-    <button class="back-btn" onclick="confirmLogout()"><i class="fas fa-sign-out-alt"></i></button>
-    <div class="app-bar-title">Lako Vendor</div>
-    <button class="menu-btn" onclick="toggleMenu()"><i class="fas fa-bars"></i></button>
+    <div class="app-bar-left">
+        <div>
+            <div class="app-bar-title">Lako Vendor</div>
+            <div class="app-bar-subtitle">Business Management Dashboard</div>
+        </div>
+    </div>
+    <div class="app-bar-right">
+        <button class="icon-btn" onclick="toggleMenu()"><i class="fas fa-sliders-h"></i></button>
+        <button class="icon-btn" onclick="confirmLogout()"><i class="fas fa-sign-out-alt"></i></button>
+    </div>
 </div>
 
 <div id="hamburgerMenu" class="hamburger-menu">
@@ -4906,26 +4876,27 @@ input:checked+.slider:before{transform:translateX(26px)}
     <div class="nav-item" onclick="showPage('reviews')"><i class="fas fa-star"></i><span>Reviews</span></div>
     <div class="nav-item" onclick="showPage('posts')"><i class="fas fa-newspaper"></i><span>Posts</span></div>
     <div class="nav-item" onclick="showPage('profile')"><i class="fas fa-user"></i><span>Profile</span></div>
-    <div class="nav-item" onclick="showPage('settings')"><i class="fas fa-sliders-h"></i><span>Settings</span></div>
 </div>
 
 <div class="content" id="content"></div>
 
-<!-- Modals -->
 <div id="productModal" class="modal"><div class="modal-content"><div class="modal-header"><h3 id="modalTitle">Add Product</h3><span class="modal-close" onclick="closeProductModal()">&times;</span></div><div id="modalBody"></div></div></div>
 <div id="postModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Create Post</h3><span class="modal-close" onclick="closePostModal()">&times;</span></div><textarea id="postContent" class="input" rows="4" placeholder="Share news, promotions, or updates..."></textarea><div class="upload-area" onclick="document.getElementById('postImages').click()"><i class="fas fa-image"></i><div>Add photos (required)</div></div><input type="file" id="postImages" multiple accept="image/*" style="display:none" onchange="previewPostImages(this)"><div id="postImagePreview" class="product-images-container"></div><button class="btn" onclick="createPost()">Publish Post</button></div></div>
-<div id="locationModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Update Location</h3><span class="modal-close" onclick="closeLocationModal()">&times;</span></div><div id="locationMap" style="height:280px;background:#eef2ee;border-radius:20px"></div><button class="btn mt-3" onclick="saveNewLocation()">Confirm Location</button></div></div>
+<div id="locationModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Update Location</h3><span class="modal-close" onclick="closeLocationModal()">&times;</span></div><div id="locationMap" style="height:280px;background:#e8ece8;border-radius:20px;margin-bottom:12px"></div><div class="flex gap-2 mb-3"><button class="btn-outline btn-sm" onclick="getCurrentLocation()"><i class="fas fa-location-dot"></i> Use My Current Location</button></div><div class="location-badge" style="background:#f8faf8;padding:12px;border-radius:12px;margin-bottom:12px"><i class="fas fa-map-pin"></i> <span id="locationText">Tap on map or use current location</span></div><button class="btn" onclick="saveNewLocation()">Confirm Location</button></div></div>
 <div id="logoModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Update Logo</h3><span class="modal-close" onclick="closeLogoModal()">&times;</span></div><div class="upload-area" onclick="document.getElementById('logoInput').click()"><i class="fas fa-image"></i><div>Upload new logo</div></div><input type="file" id="logoInput" accept="image/*" style="display:none" onchange="updateLogo(this)"><div id="logoPreview"></div><button class="btn-outline mt-3" onclick="removeLogo()">Remove Logo</button></div></div>
 <div id="hoursModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Set Hours</h3><span class="modal-close" onclick="closeHoursModal()">&times;</span></div><div id="hoursBody"></div></div></div>
 <div id="analyticsModal" class="modal"><div class="modal-content"><div class="modal-header"><h3>Analytics</h3><span class="modal-close" onclick="closeAnalyticsModal()">&times;</span></div><div id="analyticsContent"></div></div></div>
-<div id="tutorialModal" class="tutorial-overlay" style="display:none"><div class="tutorial-card"><div id="tutorialContent"></div></div></div>
 
 <script>
 let sessionToken = localStorage.getItem('session_token');
 let vendorData = null, products = [], posts = [];
 let currentProductId = null, currentImages = [];
+let currentPriceTiers = [];
+let currentTierType = 'quantity';
 let isOpen = false;
 let vendorProfile = null;
+let locationMap = null;
+let locationMarker = null;
 
 if (!sessionToken) window.location.href = '/auth';
 
@@ -4950,71 +4921,176 @@ async function loadData() {
 async function loadVendorProfile() { const data = await api('/api/vendor/profile'); if (data) vendorProfile = data; }
 
 function showPage(p) {
-    const pages = ['dashboard', 'products', 'reviews', 'posts', 'profile', 'settings'];
+    const pages = ['dashboard', 'products', 'reviews', 'posts', 'profile'];
     document.querySelectorAll('.nav-item').forEach((el, i) => el.classList.toggle('active', pages[i] === p));
     if (p === 'dashboard') showDashboard();
     else if (p === 'products') showProducts();
     else if (p === 'reviews') showReviews();
     else if (p === 'posts') showPosts();
     else if (p === 'profile') showProfile();
-    else if (p === 'settings') showSettings();
 }
+
+function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, function(m) { if(m === '&') return '&amp;'; if(m === '<') return '&lt;'; if(m === '>') return '&gt;'; return m; }); }
 
 async function showDashboard() {
     document.getElementById('content').innerHTML = '<div class="text-center mt-5"><i class="fas fa-spinner fa-pulse fa-2x"></i></div>';
     await loadData(); await loadVendorProfile();
     const analytics = await api('/api/vendor/analytics');
     const logoUrl = vendorData?.logo || null;
+    const lat = vendorData?.latitude;
+    const lng = vendorData?.longitude;
+    const locationText = (lat && lng) ? `${lat.toFixed(6)}, ${lng.toFixed(6)}` : 'Not set';
     document.getElementById('content').innerHTML = `
-        <div class="card" style="background:linear-gradient(135deg,#3a7b4d,#2e6640);color:white">
+        <div class="card" style="background:linear-gradient(135deg,#3a7b4d,#2e6640);color:white;margin-bottom:16px">
             <div class="flex justify-between items-center">
                 <div class="flex items-center gap-3">
-                    ${logoUrl ? `<img src="${logoUrl}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid white">` : `<div style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center"><i class="fas fa-store fa-2x"></i></div>`}
-                    <div><p style="opacity:0.9;font-size:13px">Welcome,</p><h2 style="font-size:22px">${vendorProfile?.user_name || vendorData?.user_name || 'Vendor'}!</h2><p style="opacity:0.85;font-size:12px">${vendorData?.business_name}</p></div>
+                    ${logoUrl ? `<img src="${logoUrl}" style="width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid white">` : `<div style="width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center"><i class="fas fa-store fa-2x"></i></div>`}
+                    <div><p style="opacity:0.9;font-size:12px">Welcome,</p><h2 style="font-size:20px">${escapeHtml(vendorProfile?.user_name || vendorData?.user_name || 'Vendor')}!</h2><p style="opacity:0.85;font-size:11px">${escapeHtml(vendorData?.business_name)}</p></div>
                 </div>
-                <button class="btn-outline btn-sm" style="background:rgba(255,255,255,0.2);border:none;color:white" onclick="openLogoModal()"><i class="fas fa-edit"></i></button>
+                <button class="btn-outline btn-sm" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:8px 12px" onclick="openLogoModal()"><i class="fas fa-edit"></i></button>
             </div>
         </div>
-        <div class="open-toggle"><div><label>Shop Status</label><div id="openStatusDisplay" class="mt-1">${isOpen ? '<span class="open-status open"> Open Now</span>' : '<span class="open-status closed"> Closed</span>'}</div></div><label class="toggle-switch"><input type="checkbox" id="openToggle" ${isOpen ? 'checked' : ''} onchange="toggleOpenStatus()"><span class="slider"></span></label></div>
+        <div class="open-toggle"><div><label style="font-size:13px">Shop Status</label><div id="openStatusDisplay" class="mt-1">${isOpen ? '<span class="open-status open"> Open Now</span>' : '<span class="open-status closed"> Closed</span>'}</div></div><label class="toggle-switch"><input type="checkbox" id="openToggle" ${isOpen ? 'checked' : ''} onchange="toggleOpenStatus()"><span class="slider"></span></label></div>
         <div class="stats-grid"><div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div><div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div><div class="stat-card"><div class="stat-value">${analytics?.total_saves || 0}</div><div class="stat-label">Saves</div></div><div class="stat-card"><div class="stat-value">${analytics?.total_likes || 0}</div><div class="stat-label">Likes</div></div></div>
-        <div class="card"><h3>Foot Traffic</h3><canvas id="trafficChart" style="height:160px"></canvas></div>
-        <div class="heatmap-container"><i class="fas fa-map-marker-alt" style="font-size:36px;color:#3a7b4d;opacity:0.3"></i><span class="text-secondary ml-2">Heatmap based on customer GPS</span></div>
+        <div class="card"><h3 style="font-size:16px;margin-bottom:12px">Business Information</h3><div class="info-row"><div class="info-icon"><i class="fas fa-tag"></i></div><div class="info-text"><div class="info-label">Category</div><div>${escapeHtml(vendorData?.category || 'Not set')}</div></div></div><div class="info-row"><div class="info-icon"><i class="fas fa-phone"></i></div><div class="info-text"><div class="info-label">Phone</div><div>${escapeHtml(vendorProfile?.phone || vendorData?.phone || 'Not set')}</div></div></div><div class="info-row"><div class="info-icon"><i class="fas fa-envelope"></i></div><div class="info-text"><div class="info-label">Email</div><div>${escapeHtml(vendorProfile?.email || vendorData?.email || 'Not set')}</div></div></div><div class="info-row"><div class="info-icon"><i class="fas fa-map-marker-alt"></i></div><div class="info-text"><div class="info-label">Location</div><div>${locationText}</div></div><button class="btn-outline btn-sm" onclick="openLocationModal()">Update</button></div></div>
+        <div class="card"><h3 style="font-size:16px;margin-bottom:12px">Foot Traffic</h3><canvas id="trafficChart" style="height:140px"></canvas></div>
+        <div class="heatmap-container"><i class="fas fa-map-marker-alt" style="font-size:28px;color:#8da38d"></i><span class="text-secondary ml-2" style="margin-left:8px">Customer GPS heatmap available in analytics</span></div>
     `;
     setTimeout(() => {
-        new Chart(document.getElementById('trafficChart'), { type: 'line', data: { labels: analytics?.weekly_labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{ label: 'Visitors', data: analytics?.weekly_traffic || [5,8,12,15,20,25,18], borderColor: '#3a7b4d', backgroundColor: 'rgba(58,123,77,0.05)', fill: true, tension: 0.3 }] } });
+        const ctx = document.getElementById('trafficChart');
+        if(ctx && typeof Chart !== 'undefined') {
+            new Chart(ctx, { type: 'line', data: { labels: analytics?.weekly_labels || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{ label: 'Visitors', data: analytics?.weekly_traffic || [5,8,12,15,20,25,18], borderColor: '#3a7b4d', backgroundColor: 'rgba(58,123,77,0.05)', fill: true, tension: 0.3, pointBackgroundColor: '#3a7b4d' }] }, options: { responsive: true, maintainAspectRatio: true } });
+        }
     }, 100);
 }
 
 async function toggleOpenStatus() { isOpen = !isOpen; await api('/api/vendor/update-open-status', { method: 'POST', body: JSON.stringify({ is_open: isOpen }) }); showDashboard(); showToast(isOpen ? 'Shop is OPEN' : 'Shop is CLOSED'); }
 
-// ==================== PRODUCTS WITH IMAGE SUPPORT ====================
-async function showProducts() {
-    await loadData();
-    document.getElementById('content').innerHTML = `<button class="btn" onclick="openAddProductModal()"><i class="fas fa-plus-circle"></i> Add Product</button><div id="productsList" class="mt-4">${products.map(p => `
-        <div class="product-card">
-            <div class="flex justify-between"><div><h4>${escapeHtml(p.name)}</h4><p class="text-secondary">${escapeHtml(p.description || '')}</p><span class="badge">${escapeHtml(p.category || 'Uncategorized')}</span></div><div class="product-price">₱${p.price}</div></div>
-            ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail || img}" onerror="this.src='https://placehold.co/200x200/f0f4f0/8da38d?text=No+Image'"></div>`).join('')}</div>` : ''}
-            <div class="flex gap-2 mt-3"><button class="btn-outline btn-sm" onclick="openEditProductModal('${p.id}')"><i class="fas fa-edit"></i> Edit</button><button class="btn-outline btn-sm" onclick="deleteProduct('${p.id}')"><i class="fas fa-trash"></i> Delete</button></div>
-        </div>
-    `).join('') || '<div class="card text-center">No products yet. Click "Add Product" to get started!</div>'}</div>`;
+function getCurrentLocation() {
+    if (!navigator.geolocation) { showToast('Geolocation not supported'); return; }
+    showToast('Getting your location...');
+    navigator.geolocation.getCurrentPosition(
+        function(pos) {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            if (locationMap) {
+                locationMap.setView([lat, lng], 16);
+                if (locationMarker) locationMarker.setLatLng([lat, lng]);
+                else locationMarker = L.marker([lat, lng], { draggable: true }).addTo(locationMap);
+                locationMarker.on('dragend', function(e) { updateLocationText(e.target.getLatLng()); });
+                updateLocationText({ lat: lat, lng: lng });
+            }
+            showToast('Location updated! Drag pin to adjust if needed');
+        },
+        function(error) { showToast('Could not get your location. Please tap on map to set manually.'); },
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
 }
 
-function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, function(m) { if(m === '&') return '&amp;'; if(m === '<') return '&lt;'; if(m === '>') return '&gt;'; return m; }); }
+function updateLocationText(pos) {
+    document.getElementById('locationText').innerHTML = `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
+}
+
+function setTierType(type) {
+    currentTierType = type;
+    renderPriceTiers();
+}
+
+function addPriceTier() {
+    if (currentTierType === 'quantity') {
+        currentPriceTiers.push({ name: 'Regular', quantity: 1, price: 0 });
+    } else {
+        currentPriceTiers.push({ name: 'Small', price: 0 });
+    }
+    renderPriceTiers();
+}
+
+function removePriceTier(index) {
+    currentPriceTiers.splice(index, 1);
+    renderPriceTiers();
+    updateBasePriceState();
+}
+
+function updatePriceTier(index, field, value) {
+    currentPriceTiers[index][field] = value;
+    if (field === 'price') {
+        updateBasePriceState();
+    }
+    renderPriceTiers();
+}
+
+function updateBasePriceState() {
+    const hasTiers = currentPriceTiers.length > 0 && currentPriceTiers.some(t => t.price > 0);
+    const basePriceInput = document.getElementById('prodPrice');
+    if (basePriceInput) {
+        if (hasTiers) {
+            basePriceInput.disabled = true;
+            basePriceInput.classList.add('disabled-input');
+            const lowestPrice = Math.min(...currentPriceTiers.map(t => parseFloat(t.price) || 0));
+            if (lowestPrice > 0) {
+                basePriceInput.value = lowestPrice;
+                const note = document.getElementById('priceNote');
+                if(note) note.innerHTML = 'Base price is now the lowest tier price. Edit tiers to change.';
+            }
+        } else {
+            basePriceInput.disabled = false;
+            basePriceInput.classList.remove('disabled-input');
+            const note = document.getElementById('priceNote');
+            if(note) note.innerHTML = 'Add price tiers below for different sizes or quantities.';
+        }
+    }
+}
+
+function renderPriceTiers() {
+    const container = document.getElementById('priceTiersContainer');
+    if (!container) return;
+    if (currentPriceTiers.length === 0) {
+        container.innerHTML = '<div class="text-secondary text-center" style="padding:12px">No price tiers added. Use base price above.</div>';
+    } else if (currentTierType === 'quantity') {
+        let html = '';
+        for(let idx = 0; idx < currentPriceTiers.length; idx++) {
+            let tier = currentPriceTiers[idx];
+            html += `<div class="price-tier-item"><div class="price-tier-row" style="margin-bottom:8px"><input type="text" placeholder="Option name (e.g., Regular, 2 pcs)" class="input" value="${escapeHtml(tier.name)}" style="flex:2" onchange="updatePriceTier(${idx}, 'name', this.value)"><input type="number" placeholder="Quantity" class="input" value="${tier.quantity}" style="flex:1" onchange="updatePriceTier(${idx}, 'quantity', parseInt(this.value))"><input type="number" placeholder="Price" class="input" value="${tier.price}" style="flex:1" onchange="updatePriceTier(${idx}, 'price', parseFloat(this.value))"><button class="remove-tier" onclick="removePriceTier(${idx})">✖</button></div><div class="text-secondary" style="font-size:11px;margin-top:4px">Display: ${escapeHtml(tier.name)} - ${tier.quantity} for ₱${tier.price}</div></div>`;
+        }
+        container.innerHTML = html;
+    } else {
+        let html = '';
+        for(let idx = 0; idx < currentPriceTiers.length; idx++) {
+            let tier = currentPriceTiers[idx];
+            html += `<div class="price-tier-item"><div class="price-tier-row" style="margin-bottom:8px"><input type="text" placeholder="Size name (e.g., Small, Medium, Large)" class="input" value="${escapeHtml(tier.name)}" style="flex:2" onchange="updatePriceTier(${idx}, 'name', this.value)"><input type="number" placeholder="Price" class="input" value="${tier.price}" style="flex:1" onchange="updatePriceTier(${idx}, 'price', parseFloat(this.value))"><button class="remove-tier" onclick="removePriceTier(${idx})">✖</button></div><div class="text-secondary" style="font-size:11px;margin-top:4px">Display: ${escapeHtml(tier.name)} - ₱${tier.price}</div></div>`;
+        }
+        container.innerHTML = html;
+    }
+}
+
+async function showProducts() {
+    await loadData();
+    document.getElementById('content').innerHTML = `<button class="btn" onclick="openAddProductModal()"><i class="fas fa-plus"></i> Add Product</button><div id="productsList" class="mt-3">${products.map(p => `
+        <div class="product-card">
+            <div class="flex justify-between"><div><h4 style="font-size:15px">${escapeHtml(p.name)}</h4><p class="text-secondary" style="font-size:11px">${escapeHtml(p.description || '').substring(0, 60)}</p><span class="badge">${escapeHtml(p.category || 'Uncategorized')}</span></div><div class="product-price">₱${p.price}</div></div>
+            ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail || img}" onerror="this.src='https://placehold.co/200x200/f0f4f0/8da38d?text=No+Image'"></div>`).join('')}</div>` : ''}
+            ${p.priceTiers && p.priceTiers.length > 0 ? `<div class="mt-2"><div class="text-secondary" style="font-size:11px">Price Options:</div>${p.priceTiers.map(t => `<div class="badge" style="margin:2px">${escapeHtml(t.name)}: ${t.quantity ? t.quantity + ' for ' : ''}₱${t.price}</div>`).join('')}</div>` : ''}
+            <div class="flex gap-2 mt-3"><button class="btn-outline btn-sm" onclick="openEditProductModal('${p.id}')"><i class="fas fa-edit"></i> Edit</button><button class="btn-outline btn-sm btn-danger" onclick="deleteProduct('${p.id}')"><i class="fas fa-trash"></i> Delete</button></div>
+        </div>
+    `).join('') || '<div class="card text-center" style="cursor:default"><div class="text-secondary">No products yet. Click "Add Product" to get started!</div></div>'}</div>`;
+}
 
 function openAddProductModal() { 
     currentProductId = null; 
     currentImages = []; 
+    currentPriceTiers = [];
+    currentTierType = 'quantity';
     renderProductModal(); 
 }
 
-async function openEditProductModal(id) { 
-    await loadData();
-    const p = products.find(x => x.id == id); 
-    if(p) { 
-        currentProductId = id; 
-        currentImages = p.images ? [...p.images] : []; 
-        renderProductModal(p); 
-    } 
+async function openEditProductModal(productId) {
+    const product = products.find(p => p.id == productId);
+    if (!product) return;
+    currentProductId = productId;
+    currentImages = product.images ? [...product.images] : [];
+    currentPriceTiers = product.priceTiers ? [...product.priceTiers] : [];
+    currentTierType = product.tierType || 'quantity';
+    renderProductModal(product);
 }
 
 function renderProductModal(ex = null) {
@@ -5030,24 +5106,24 @@ function renderProductModal(ex = null) {
         <input id="prodCategory" class="input" placeholder="Category (e.g., Pancit, Siomai, Coffee)" value="${escapeHtml(categoryValue)}">
         <input id="prodPrice" type="number" class="input" placeholder="Price (₱) *" step="0.01" value="${priceValue}">
         
-        <div style="margin:12px 0">
-            <label class="text-secondary" style="font-size:13px">Product Photos (PNG, JPG, JPEG)</label>
-            <div class="upload-area" onclick="document.getElementById('prodImages').click()" style="margin-top:8px">
-                <i class="fas fa-camera"></i>
-                <div>Click to upload photos</div>
-                <div style="font-size:11px">PNG, JPG, JPEG up to 5MB each</div>
-            </div>
-            <input type="file" id="prodImages" multiple accept="image/png,image/jpeg,image/jpg" style="display:none" onchange="previewImages(this)">
-            <div id="imagePreview" class="product-images-container"></div>
+        <div class="tier-type-selector">
+            <div class="tier-type-btn ${currentTierType === 'quantity' ? 'active' : ''}" onclick="setTierType('quantity')">By Quantity</div>
+            <div class="tier-type-btn ${currentTierType === 'size' ? 'active' : ''}" onclick="setTierType('size')">By Size</div>
         </div>
         
-        <div class="flex gap-2 mt-4">
-            <button class="btn" onclick="saveProduct()"><i class="fas fa-save"></i> Save Product</button>
-            <button class="btn-outline" onclick="closeProductModal()">Cancel</button>
+        <div style="margin-top: 8px; margin-bottom: 8px;">
+            <div class="flex justify-between items-center">
+                <span style="font-size: 13px; color: #2c3e2c; font-weight: 500;">Price Tiers (Optional)</span>
+                <button class="btn-outline btn-sm" onclick="addPriceTier()" style="padding: 4px 10px;">+ Add Tier</button>
+            </div>
+            <div id="priceTiersContainer" style="margin-top: 8px;"></div>
         </div>
+        
+        <div id="priceNote" class="price-note">Add price tiers below for different sizes or quantities.</div>
+        
+        <div style="margin:12px 0"><label class="text-secondary" style="font-size:12px">Product Photos</label><div class="upload-area" onclick="document.getElementById('prodImages').click()" style="margin-top:6px"><i class="fas fa-camera"></i><div style="font-size:12px">Click to upload photos</div><div style="font-size:10px">PNG, JPG, JPEG up to 5MB each</div></div><input type="file" id="prodImages" multiple accept="image/png,image/jpeg,image/jpg" style="display:none" onchange="previewImages(this)"><div id="imagePreview" class="product-images-container"></div></div>
+        <div class="flex gap-2 mt-4"><button class="btn" onclick="saveProduct()"><i class="fas fa-save"></i> Save Product</button><button class="btn-outline" onclick="closeProductModal()">Cancel</button></div>
     `;
-    
-    // Display existing images
     const previewDiv = document.getElementById('imagePreview');
     if (previewDiv) {
         previewDiv.innerHTML = '';
@@ -5058,129 +5134,76 @@ function renderProductModal(ex = null) {
             });
         }
     }
-    
+    renderPriceTiers();
+    updateBasePriceState();
     document.getElementById('productModal').classList.add('show');
-    
-    setTimeout(() => {
-        const chooseBtn = document.getElementById('prodImages');
-        if (chooseBtn) {
-            chooseBtn.onchange = () => previewImages(chooseBtn);
-        }
-    }, 100);
 }
 
 function previewImages(input) {
     const previewDiv = document.getElementById('imagePreview');
     if (!previewDiv) return;
-    
     for (let i = 0; i < input.files.length; i++) {
         const file = input.files[i];
-        
-        // Validate file type
-        if (!file.type.match('image.*')) {
-            showToast('Please select an image file (PNG, JPG, JPEG)');
-            continue;
-        }
-        
-        // Validate file size (max 5MB)
-        if (file.size > 5 * 1024 * 1024) {
-            showToast('File too large. Max 5MB');
-            continue;
-        }
-        
+        if (!file.type.match('image.*')) { showToast('Please select an image file'); continue; }
+        if (file.size > 5 * 1024 * 1024) { showToast('File too large. Max 5MB'); continue; }
         const reader = new FileReader();
-        reader.onload = function(e) {
-            previewDiv.innerHTML += `
-                <div class="image-preview">
-                    <img src="${e.target.result}">
-                    <div class="remove-img" onclick="this.parentElement.remove()">✖</div>
-                </div>
-            `;
-        };
+        reader.onload = function(e) { previewDiv.innerHTML += `<div class="image-preview"><img src="${e.target.result}"><div class="remove-img" onclick="this.parentElement.remove()">✖</div></div>`; };
         reader.readAsDataURL(file);
     }
-    // Clear the input to allow re-uploading same files
     input.value = '';
 }
 
-function removeImage(index) {
-    currentImages.splice(index, 1);
-    const previewDiv = document.getElementById('imagePreview');
-    if (previewDiv && previewDiv.children[index]) {
-        previewDiv.children[index].remove();
-    }
+function removeImage(index) { 
+    currentImages.splice(index, 1); 
+    const previewDiv = document.getElementById('imagePreview'); 
+    if (previewDiv && previewDiv.children[index]) previewDiv.children[index].remove(); 
 }
 
 async function saveProduct() {
     const name = document.getElementById('prodName').value.trim();
     const category = document.getElementById('prodCategory').value.trim();
     const price = parseFloat(document.getElementById('prodPrice').value);
+    if (!name || isNaN(price) || price <= 0) { showToast('Product name and valid price are required'); return; }
+    if (!category) { showToast('Please enter a category'); return; }
     
-    if (!name || isNaN(price) || price <= 0) {
-        showToast('Product name and valid price are required');
-        return;
+    let priceTiers = currentPriceTiers.filter(t => t.price > 0 && t.name);
+    let finalPrice = price;
+    let tierType = currentTierType;
+    
+    if (priceTiers.length > 0) {
+        const lowestPrice = Math.min(...priceTiers.map(t => parseFloat(t.price)));
+        finalPrice = lowestPrice;
     }
     
-    if (!category) {
-        showToast('Please enter a category');
-        return;
-    }
-    
-    // Collect images from preview (new ones added)
-    const newImages = [];
+    const newImages = []; 
     const previewDiv = document.getElementById('imagePreview');
     if (previewDiv) {
         const previewImgs = previewDiv.querySelectorAll('.image-preview img');
         for (let i = 0; i < previewImgs.length; i++) {
             const src = previewImgs[i].src;
-            // If it's a data URL (new upload) or existing image URL
-            if (src && src.startsWith('data:image')) {
-                newImages.push({ thumbnail: src, full: src });
-            } else if (src && !src.startsWith('data:image')) {
-                // This is an existing image from server, preserve it
-                newImages.push({ thumbnail: src, full: src });
-            }
+            if (src && src.startsWith('data:image')) newImages.push({ thumbnail: src, full: src });
+            else if (src && !src.startsWith('data:image')) newImages.push({ thumbnail: src, full: src });
         }
     }
     
-    // Also include any existing images that weren't removed
-    // We need to track which existing images are still in the preview
-    // For simplicity, we'll use newImages as the final list
-    
-    const productData = {
-        name: name,
-        description: document.getElementById('prodDesc').value || '',
-        category: category,
-        price: price,
-        images: newImages.length > 0 ? newImages : currentImages
+    const productData = { 
+        name, 
+        description: document.getElementById('prodDesc').value || '', 
+        category, 
+        price: finalPrice,
+        tierType: tierType,
+        priceTiers: priceTiers,
+        images: newImages.length > 0 ? newImages : currentImages 
     };
-    
-    console.log('Saving product:', productData);
-    
     const endpoint = currentProductId ? '/api/vendor/product/update' : '/api/vendor/product/create';
     const body = currentProductId ? { product_id: currentProductId, ...productData } : productData;
-    
     const res = await api(endpoint, { method: 'POST', body: JSON.stringify(body) });
-    
-    if (res && res.success) {
-        showToast(currentProductId ? 'Product updated successfully!' : 'Product created successfully!');
-        closeProductModal();
-        await showProducts();
-    } else {
-        showToast('Failed to save product. Please try again.');
-        console.error('Save error:', res);
-    }
+    if (res && res.success) { showToast(currentProductId ? 'Product updated!' : 'Product created!'); closeProductModal(); await showProducts(); }
+    else { showToast('Failed to save product'); }
 }
 
-async function deleteProduct(id) {
-    if (confirm('Delete this product permanently?')) {
-        const res = await api('/api/vendor/product/delete', { method: 'POST', body: JSON.stringify({ product_id: id }) });
-        if (res && res.success) { showToast('Product deleted'); showProducts(); }
-        else showToast('Failed to delete product');
-    }
-}
+async function deleteProduct(id) { if (confirm('Delete this product permanently?')) { const res = await api('/api/vendor/product/delete', { method: 'POST', body: JSON.stringify({ product_id: id }) }); if (res && res.success) { showToast('Product deleted'); showProducts(); } else showToast('Failed to delete product'); } }
 
-// ==================== REVIEWS ====================
 async function showReviews() {
     const data = await api('/api/vendor/reviews');
     document.getElementById('content').innerHTML = (data?.reviews || []).map(r => `
@@ -5188,27 +5211,26 @@ async function showReviews() {
             <div class="flex justify-between items-center"><div><strong><i class="fas fa-user-circle"></i> ${escapeHtml(r.customer_name)}</strong><div class="stars mt-1">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div></div><span class="text-secondary">${new Date(r.created_at).toLocaleDateString()}</span></div>
             <p class="mt-2">${escapeHtml(r.comment || 'No comment provided')}</p>
         </div>
-    `).join('') || '<div class="card text-center">No reviews yet.</div>';
+    `).join('') || '<div class="card text-center" style="cursor:default"><div class="text-secondary">No reviews yet.</div></div>';
 }
 
-// ==================== POSTS ====================
 async function showPosts() {
     await loadData();
     const feed = await api('/api/vendor/posts');
     document.getElementById('content').innerHTML = `
         <button class="btn" onclick="openPostModal()"><i class="fas fa-plus"></i> Create Post</button>
-        <div id="postsList" class="mt-4">${(feed?.posts || []).map(p => `
+        <div id="postsList" class="mt-3">${(feed?.posts || []).map(p => `
             <div class="post-card">
                 <div class="post-header">
-                    ${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:48px;height:48px;border-radius:50%;object-fit:cover">` : `<div class="post-avatar"><i class="fas fa-store"></i></div>`}
-                    <div><strong>${escapeHtml(vendorData?.business_name || 'Store')}</strong><br><span class="text-secondary">${new Date(p.created_at).toLocaleDateString()}</span></div>
+                    ${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:40px;height:40px;border-radius:50%;object-fit:cover">` : `<div class="post-avatar"><i class="fas fa-store"></i></div>`}
+                    <div><strong style="font-size:14px">${escapeHtml(vendorData?.business_name || 'Store')}</strong><br><span class="text-secondary" style="font-size:10px">${new Date(p.created_at).toLocaleDateString()}</span></div>
                 </div>
-                <div class="post-content">${escapeHtml(p.content)}</div>
+                <div class="post-content" style="font-size:13px">${escapeHtml(p.content)}</div>
                 ${p.images && p.images.length ? `<div class="image-grid mt-2">${p.images.slice(0,3).map(img => `<div class="image-thumb"><img src="${img.thumbnail || img}"></div>`).join('')}</div>` : ''}
                 <div class="post-stats"><span><i class="far fa-heart"></i> ${p.likes || 0}</span><span><i class="far fa-comment"></i> ${p.comment_count || 0}</span><span><i class="far fa-bookmark"></i> ${p.saves || 0}</span></div>
                 <div class="flex gap-2 mt-3"><button class="btn-outline btn-sm" onclick="deletePost('${p.id}')"><i class="fas fa-trash"></i> Delete</button></div>
             </div>
-        `).join('') || '<div class="card text-center">No posts yet. Create your first post!</div>'}</div>`;
+        `).join('') || '<div class="card text-center" style="cursor:default"><div class="text-secondary">No posts yet. Create your first post!</div></div>'}</div>`;
 }
 
 function previewPostImages(input) {
@@ -5218,9 +5240,7 @@ function previewPostImages(input) {
         if (!f.type.match('image.*')) continue;
         if (f.size > 5 * 1024 * 1024) { showToast('File too large'); continue; }
         const reader = new FileReader();
-        reader.onload = (e) => {
-            preview.innerHTML += `<div class="image-preview"><img src="${e.target.result}"><div class="remove-img" onclick="this.parentElement.remove()">✖</div></div>`;
-        };
+        reader.onload = (e) => { preview.innerHTML += `<div class="image-preview"><img src="${e.target.result}"><div class="remove-img" onclick="this.parentElement.remove()">✖</div></div>`; };
         reader.readAsDataURL(f);
     }
 }
@@ -5230,87 +5250,94 @@ async function createPost() {
     const files = document.getElementById('postImages').files;
     if (!content) { showToast('Please write something'); return; }
     if (files.length === 0) { showToast('Please add at least 1 photo'); return; }
-    
     const images = [];
     for (let f of files) {
         if (!f.type.match('image.*')) continue;
-        const imgData = await new Promise(resolve => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsDataURL(f);
-        });
+        const imgData = await new Promise(resolve => { const reader = new FileReader(); reader.onload = (e) => resolve(e.target.result); reader.readAsDataURL(f); });
         images.push(imgData);
     }
-    
     const res = await api('/api/vendor/post/create', { method: 'POST', body: JSON.stringify({ content, images }) });
-    if (res && res.success) {
-        showToast('Post published!');
-        closePostModal();
-        document.getElementById('postContent').value = '';
-        document.getElementById('postImages').value = '';
-        document.getElementById('postImagePreview').innerHTML = '';
-        showPosts();
-    } else {
-        showToast('Failed to create post');
-    }
+    if (res && res.success) { showToast('Post published!'); closePostModal(); document.getElementById('postContent').value = ''; document.getElementById('postImages').value = ''; document.getElementById('postImagePreview').innerHTML = ''; showPosts(); }
+    else { showToast('Failed to create post'); }
 }
 
-async function deletePost(id) {
-    if (confirm('Delete this post?')) {
-        await api('/api/vendor/post/delete', { method: 'POST', body: JSON.stringify({ post_id: id }) });
-        showToast('Post deleted');
-        showPosts();
-    }
-}
+async function deletePost(id) { if (confirm('Delete this post?')) { await api('/api/vendor/post/delete', { method: 'POST', body: JSON.stringify({ post_id: id }) }); showToast('Post deleted'); showPosts(); } }
 
-function openPostModal() {
-    document.getElementById('postModal').classList.add('show');
-    document.getElementById('postContent').value = '';
-    document.getElementById('postImages').value = '';
-    document.getElementById('postImagePreview').innerHTML = '';
-}
+function openPostModal() { document.getElementById('postModal').classList.add('show'); document.getElementById('postContent').value = ''; document.getElementById('postImages').value = ''; document.getElementById('postImagePreview').innerHTML = ''; }
 
-// ==================== PROFILE & SETTINGS ====================
 async function showProfile() {
     await loadData(); await loadVendorProfile();
     document.getElementById('content').innerHTML = `
         <div class="card text-center">
-            <div class="business-logo" style="width:100px;height:100px;margin:0 auto 16px;background:#eff3ef;border-radius:50%;display:flex;align-items:center;justify-content:center">${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">` : '<i class="fas fa-store fa-3x" style="color:#3a7b4d"></i>'}</div>
-            <h2>${escapeHtml(vendorData?.business_name || '')}</h2>
-            <p class="text-secondary">${vendorData?.email || ''}</p>
-            <div class="stats-grid mt-4"><div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div><div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div></div>
-            <button class="btn-outline mt-3" onclick="showPage('settings')">Edit Profile</button>
+            <div class="avatar-lg" style="margin:0 auto 16px;background:#f0f4f0">${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">` : '<i class="fas fa-store fa-3x" style="color:#3a7b4d"></i>'}</div>
+            <h3 style="font-size:18px">${escapeHtml(vendorData?.business_name || '')}</h3>
+            <p class="text-secondary">${escapeHtml(vendorData?.email || '')}</p>
+            <div class="stats-grid mt-3"><div class="stat-card"><div class="stat-value">${vendorData?.rating || 'New'}</div><div class="stat-label">Rating</div></div><div class="stat-card"><div class="stat-value">${vendorData?.review_count || 0}</div><div class="stat-label">Reviews</div></div></div>
+            <div class="button-group"><button class="btn-outline" onclick="openLogoModal()"><i class="fas fa-image"></i> Update Logo</button><button class="btn-outline" onclick="openLocationModal()"><i class="fas fa-map-marker-alt"></i> Location</button><button class="btn-outline" onclick="openHoursModal()"><i class="fas fa-clock"></i> Hours</button></div>
         </div>
     `;
 }
 
-async function showSettings() {
-    await loadData(); await loadVendorProfile();
-    const hours = vendorData?.operating_hours || {};
-    document.getElementById('content').innerHTML = `
-        <div class="card"><h3>Operating Hours</h3><div id="hoursPreview" class="hours-grid"></div><button class="btn-outline mt-3" onclick="openHoursModal()">Set Hours</button></div>
-        <div class="card"><h3>Business Location</h3><p class="text-secondary">Current: ${vendorData?.latitude || 'Not set'}, ${vendorData?.longitude || 'Not set'}</p><button class="btn-outline" onclick="openLocationModal()">Update Location</button></div>
-        <div class="card"><h3>Business Logo</h3>${vendorData?.logo ? `<img src="${vendorData.logo}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:12px">` : '<p class="text-secondary">No logo uploaded</p>'}<button class="btn-outline" onclick="openLogoModal()">Update Logo</button></div>
-        <div class="card"><h3>Business Info</h3><p><strong>${escapeHtml(vendorData?.business_name || '')}</strong><br><i class="fas fa-tag"></i> ${escapeHtml(vendorData?.category) || 'Not set'}<br><i class="fas fa-phone"></i> ${vendorProfile?.phone || vendorData?.phone || 'No phone'}<br><i class="fas fa-envelope"></i> ${vendorProfile?.email || vendorData?.email}</p></div>
-    `;
-    const preview = document.getElementById('hoursPreview');
-    const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    if (preview) preview.innerHTML = days.map(day => `<div class="hours-item"><span class="hours-day">${day}</span><span>${hours[day] || 'closed'}</span></div>`).join('');
+function openLogoModal() { document.getElementById('logoModal').classList.add('show'); if(vendorData?.logo) document.getElementById('logoPreview').innerHTML = `<img src="${vendorData.logo}" style="width:80px;height:80px;border-radius:50%;object-fit:cover">`; }
+async function updateLogo(input) { if(input.files[0]){ const file=input.files[0]; if(file.size>5*1024*1024){ showToast('File too large. Max 5MB'); return; } const r=new FileReader(); r.onload=async(e)=>{ const res=await api('/api/vendor/update-logo',{method:'POST',body:JSON.stringify({logo:e.target.result})}); if(res?.success){ showToast('Logo updated!'); closeLogoModal(); showProfile(); showDashboard(); } else showToast('Failed to update logo'); }; r.readAsDataURL(file); } }
+async function removeLogo(){ if(confirm('Remove your business logo?')){ const res=await api('/api/vendor/update-logo',{method:'POST',body:JSON.stringify({logo:null})}); if(res?.success){ showToast('Logo removed'); closeLogoModal(); showProfile(); showDashboard(); } } }
+
+function openHoursModal() { const hours=vendorData?.operating_hours||{}; const days=['monday','tuesday','wednesday','thursday','friday','saturday','sunday']; let html=''; days.forEach(day=>{ const val=hours[day]||'closed'; const closed=val==='closed'; let [openH=9,closeH=18]=val!=='closed'?val.split('-').map(parseInt):[9,18]; html+=`<div class="card" style="margin-bottom:12px"><div class="flex justify-between"><h4 style="font-size:14px">${day}</h4><label style="font-size:12px"><input type="checkbox" id="closed_${day}" ${closed?'checked':''} onchange="toggleDay('${day}')"> Closed</label></div><div id="sliders_${day}" ${closed?'style="display:none"':''}><div class="flex items-center gap-2 mt-2"><span style="font-size:12px">Open</span><input type="range" id="open_${day}" min="0" max="23" value="${openH}" oninput="document.getElementById('open_val_${day}').innerText=this.value+':00'"><span id="open_val_${day}" style="font-size:12px">${openH}:00</span></div><div class="flex items-center gap-2 mt-2"><span style="font-size:12px">Close</span><input type="range" id="close_${day}" min="0" max="23" value="${closeH}" oninput="document.getElementById('close_val_${day}').innerText=this.value+':00'"><span id="close_val_${day}" style="font-size:12px">${closeH}:00</span></div></div></div>`; }); document.getElementById('hoursBody').innerHTML=html+'<button class="btn mt-2" onclick="saveHours()">Save Hours</button>'; document.getElementById('hoursModal').classList.add('show'); window.toggleDay=(day)=>{ const closed=document.getElementById(`closed_${day}`).checked; document.getElementById(`sliders_${day}`).style.display=closed?'none':'block'; }; }
+async function saveHours(){ const hours={}; const days=['monday','tuesday','wednesday','thursday','friday','saturday','sunday']; days.forEach(day=>{ const closed=document.getElementById(`closed_${day}`)?.checked; if(closed) hours[day]='closed'; else{ const openH=document.getElementById(`open_${day}`)?.value||9; const closeH=document.getElementById(`close_${day}`)?.value||18; hours[day]=`${openH}:00-${closeH}:00`; } }); const res=await api('/api/vendor/update-hours',{method:'POST',body:JSON.stringify({hours})}); if(res?.success){ showToast('Hours saved!'); closeHoursModal(); showProfile(); } }
+
+function openLocationModal() {
+    document.getElementById('locationModal').classList.add('show');
+    setTimeout(() => {
+        if (typeof L !== 'undefined') {
+            if (locationMap) locationMap.remove();
+            const defaultLat = vendorData?.latitude || 13.95;
+            const defaultLng = vendorData?.longitude || 121.3167;
+            locationMap = L.map('locationMap').setView([defaultLat, defaultLng], 16);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(locationMap);
+            locationMarker = L.marker([defaultLat, defaultLng], { draggable: true }).addTo(locationMap);
+            locationMarker.on('dragend', function(e) { updateLocationText(e.target.getLatLng()); });
+            updateLocationText({ lat: defaultLat, lng: defaultLng });
+            document.getElementById('locationText').innerHTML = `${defaultLat.toFixed(6)}, ${defaultLng.toFixed(6)}`;
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    function(pos) {
+                        const lat = pos.coords.latitude;
+                        const lng = pos.coords.longitude;
+                        locationMap.setView([lat, lng], 16);
+                        locationMarker.setLatLng([lat, lng]);
+                        updateLocationText({ lat: lat, lng: lng });
+                        showToast('Current location detected! Drag pin to adjust if needed');
+                    },
+                    function() { console.log('Could not get current location'); },
+                    { enableHighAccuracy: true, timeout: 5000 }
+                );
+            }
+        }
+    }, 100);
 }
 
-function openLogoModal() { document.getElementById('logoModal').classList.add('show'); if(vendorData?.logo) document.getElementById('logoPreview').innerHTML = `<img src="${vendorData.logo}" style="width:100px;height:100px;border-radius:50%;object-fit:cover">`; }
-async function updateLogo(input) { if(input.files[0]){ const file=input.files[0]; if(file.size>5*1024*1024){ showToast('File too large. Max 5MB'); return; } const r=new FileReader(); r.onload=async(e)=>{ const res=await api('/api/vendor/update-logo',{method:'POST',body:JSON.stringify({logo:e.target.result})}); if(res?.success){ showToast('Logo updated!'); closeLogoModal(); showSettings(); showDashboard(); } else showToast('Failed to update logo'); }; r.readAsDataURL(file); } }
-async function removeLogo(){ if(confirm('Remove your business logo?')){ const res=await api('/api/vendor/update-logo',{method:'POST',body:JSON.stringify({logo:null})}); if(res?.success){ showToast('Logo removed'); closeLogoModal(); showSettings(); showDashboard(); } } }
-function openHoursModal() { const hours=vendorData?.operating_hours||{}; const days=['monday','tuesday','wednesday','thursday','friday','saturday','sunday']; let html=''; days.forEach(day=>{ const val=hours[day]||'closed'; const closed=val==='closed'; let [openH=9,closeH=18]=val!=='closed'?val.split('-').map(parseInt):[9,18]; html+=`<div class="card"><div class="flex justify-between"><h4>${day}</h4><label><input type="checkbox" id="closed_${day}" ${closed?'checked':''} onchange="toggleDay('${day}')"> Closed</label></div><div id="sliders_${day}" ${closed?'style="display:none"':''}><div><span>Open</span><input type="range" id="open_${day}" min="0" max="23" value="${openH}" oninput="document.getElementById('open_val_${day}').innerText=this.value+':00'"><span id="open_val_${day}">${openH}:00</span></div><div><span>Close</span><input type="range" id="close_${day}" min="0" max="23" value="${closeH}" oninput="document.getElementById('close_val_${day}').innerText=this.value+':00'"><span id="close_val_${day}">${closeH}:00</span></div></div></div>`; }); document.getElementById('hoursBody').innerHTML=html+'<button class="btn mt-4" onclick="saveHours()">Save Hours</button>'; document.getElementById('hoursModal').classList.add('show'); window.toggleDay=(day)=>{ const closed=document.getElementById(`closed_${day}`).checked; document.getElementById(`sliders_${day}`).style.display=closed?'none':'block'; }; }
-function updateTime(type,day,value){ document.getElementById(`${type}_val_${day}`).innerText=`${value}:00`; }
-async function saveHours(){ const hours={}; const days=['monday','tuesday','wednesday','thursday','friday','saturday','sunday']; days.forEach(day=>{ const closed=document.getElementById(`closed_${day}`)?.checked; if(closed) hours[day]='closed'; else{ const openH=document.getElementById(`open_${day}`)?.value||9; const closeH=document.getElementById(`close_${day}`)?.value||18; hours[day]=`${openH}:00-${closeH}:00`; } }); const res=await api('/api/vendor/update-hours',{method:'POST',body:JSON.stringify({hours})}); if(res?.success){ showToast('Hours saved!'); closeHoursModal(); showSettings(); } }
-function openLocationModal(){ document.getElementById('locationModal').classList.add('show'); setTimeout(()=>{ if(typeof L!=='undefined'){ if(window.locationMap) window.locationMap.remove(); window.locationMap=L.map('locationMap').setView([vendorData?.latitude||14.5995,vendorData?.longitude||120.9842],16); L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(window.locationMap); window.locationMarker=L.marker([vendorData?.latitude||14.5995,vendorData?.longitude||120.9842],{draggable:true}).addTo(window.locationMap); window.locationMarker.on('dragend',e=>{ const pos=e.target.getLatLng(); document.getElementById('locationText').innerHTML=`${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`; }); document.getElementById('locationText').innerHTML=`${vendorData?.latitude||'Tap to set'}, ${vendorData?.longitude||'Tap to set'}`; } },100); }
-async function saveNewLocation(){ if(window.locationMarker){ const pos=window.locationMarker.getLatLng(); const res=await api('/api/vendor/update-location',{method:'POST',body:JSON.stringify({latitude:pos.lat,longitude:pos.lng})}); if(res?.success){ showToast('Location updated!'); closeLocationModal(); showSettings(); } } }
-async function showAnalytics(){ const data=await api('/api/vendor/analytics'); document.getElementById('analyticsContent').innerHTML=`<div class="stats-grid"><div class="stat-card"><div class="stat-value">${data.total_visits||0}</div><div class="stat-label">Visits</div></div><div class="stat-card"><div class="stat-value">${data.avg_rating||'N/A'}</div><div class="stat-label">Rating</div></div></div><canvas id="analyticsChart"></canvas>`; document.getElementById('analyticsModal').classList.add('show'); setTimeout(()=>{ new Chart(document.getElementById('analyticsChart'),{type:'bar',data:{labels:data.weekly_labels||['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],datasets:[{label:'Traffic',data:data.weekly_traffic||[5,8,12,15,20,25,18],backgroundColor:'#3a7b4d',borderRadius:8}]}}); },100); }
-function showTutorial() { alert("Vendor Dashboard Tutorial\\n\\n✓ Add products with photos (PNG, JPG, JPEG)\\n✓ Edit existing products\\n✓ Create posts to engage customers\\n✓ View customer reviews\\n✓ Toggle open/close status\\n✓ Set operating hours and location"); }
+async function saveNewLocation() {
+    if (locationMarker) {
+        const pos = locationMarker.getLatLng();
+        const res = await api('/api/vendor/update-location', { method: 'POST', body: JSON.stringify({ latitude: pos.lat, longitude: pos.lng }) });
+        if (res?.success) {
+            showToast('Location updated!');
+            closeLocationModal();
+            await loadData();
+            showProfile();
+            showDashboard();
+        } else {
+            showToast('Failed to update location');
+        }
+    }
+}
+
+async function showAnalytics(){ const data=await api('/api/vendor/analytics'); document.getElementById('analyticsContent').innerHTML=`<div class="stats-grid"><div class="stat-card"><div class="stat-value">${data.total_visits||0}</div><div class="stat-label">Total Visits</div></div><div class="stat-card"><div class="stat-value">${data.total_saves||0}</div><div class="stat-label">Total Saves</div></div><div class="stat-card"><div class="stat-value">${data.total_likes||0}</div><div class="stat-label">Total Likes</div></div><div class="stat-card"><div class="stat-value">${data.avg_rating||'N/A'}</div><div class="stat-label">Avg Rating</div></div></div><div class="card"><h3 style="font-size:14px;margin-bottom:12px">Weekly Traffic</h3><canvas id="analyticsChart" style="height:160px"></canvas></div>${data.peak_hours && Object.keys(data.peak_hours).length > 0 ? `<div class="card"><h3 style="font-size:14px;margin-bottom:12px">Peak Hours</h3><div class="flex flex-wrap gap-2">${Object.entries(data.peak_hours).map(([hour,count]) => `<span class="badge">${hour}:00 (${count} visits)</span>`).join('')}</div></div>` : ''}`; document.getElementById('analyticsModal').classList.add('show'); setTimeout(()=>{ const ctx = document.getElementById('analyticsChart'); if(ctx && typeof Chart !== 'undefined') { new Chart(ctx,{type:'bar',data:{labels:data.weekly_labels||['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],datasets:[{label:'Traffic',data:data.weekly_traffic||[5,8,12,15,20,25,18],backgroundColor:'#3a7b4d',borderRadius:8}]}}); } },100); }
+function showTutorial() { alert("Vendor Dashboard Tutorial\\n\\n Add products with photos (PNG, JPG, JPEG)\\n Edit existing products\\n Create posts to engage customers\\n View customer reviews\\n Toggle open/close status\\n Set operating hours and location"); }
 function closeProductModal(){ document.getElementById('productModal').classList.remove('show'); }
 function closePostModal(){ document.getElementById('postModal').classList.remove('show'); }
-function closeLocationModal(){ document.getElementById('locationModal').classList.remove('show'); }
+function closeLocationModal(){ document.getElementById('locationModal').classList.remove('show'); if(locationMap) locationMap.remove(); locationMap = null; locationMarker = null; }
 function closeLogoModal(){ document.getElementById('logoModal').classList.remove('show'); }
 function closeHoursModal(){ document.getElementById('hoursModal').classList.remove('show'); }
 function closeAnalyticsModal(){ document.getElementById('analyticsModal').classList.remove('show'); }
@@ -5321,6 +5348,7 @@ let fa=document.createElement('link');fa.rel='stylesheet';fa.href='https://cdnjs
 let chartScript=document.createElement('script');chartScript.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';document.head.appendChild(chartScript);
 let leaflet=document.createElement('link');leaflet.rel='stylesheet';leaflet.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(leaflet);
 let leafletScript=document.createElement('script');leafletScript.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';document.head.appendChild(leafletScript);
+
 if(sessionToken){ showDashboard(); } else window.location.href='/auth';
 </script>
 ''')
@@ -5413,6 +5441,22 @@ textarea.input{min-height:80px;resize:vertical}
 .comment-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .comment-author{font-weight:600;font-size:13px}
 .comment-time{font-size:10px;color:#8da38d}
+.price-tier-item{background:#f8faf8;border-radius:12px;padding:12px;margin-bottom:8px}
+.price-tier-row{display:flex;gap:8px;align-items:center}
+.price-tier-row input{flex:1;margin-bottom:0}
+.remove-tier{background:#e53935;color:white;border:none;width:32px;height:32px;border-radius:8px;cursor:pointer}
+.add-tier-btn{background:#3a7b4d;color:white;border:none;padding:10px;border-radius:30px;margin-top:8px;width:100%;cursor:pointer}
+.disabled-input{background:#f0f0f0;color:#999;cursor:not-allowed}
+.price-note{font-size:11px;color:#8da38d;margin-top:8px;padding:8px;background:#f8faf8;border-radius:8px}
+.tier-type-selector{display:flex;gap:10px;margin-bottom:16px}
+.tier-type-btn{flex:1;padding:8px;background:#f8faf8;border:1px solid #e0e8e0;border-radius:30px;cursor:pointer;text-align:center;font-size:13px}
+.tier-type-btn.active{background:#3a7b4d;color:white;border-color:#3a7b4d}
+.upload-area{background:#f8faf8;border:2px dashed #c0d0c0;border-radius:16px;padding:16px;text-align:center;cursor:pointer;margin:12px 0}
+.upload-area i{font-size:28px;color:#3a7b4d;margin-bottom:8px;display:block}
+.product-images-container{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.image-preview{position:relative;width:70px;height:70px}
+.image-preview img{width:100%;height:100%;border-radius:10px;object-fit:cover;border:1px solid #e8ece8}
+.remove-img{position:absolute;top:-6px;right:-6px;background:#e53935;color:white;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:10px;cursor:pointer}
 .fa,.far,.fas{font-family:"Font Awesome 6 Free"}
 </style>
 
@@ -5457,12 +5501,12 @@ textarea.input{min-height:80px;resize:vertical}
             <span class="modal-close" onclick="closeCreatePostModal()">&times;</span>
         </div>
         <textarea id="adminPostContent" class="input" rows="4" placeholder="What's on your mind?"></textarea>
-        <div class="upload-area" onclick="document.getElementById('adminPostImages').click()" style="background:#f8faf8;border:1px dashed #c0d0c0;border-radius:16px;padding:16px;text-align:center;cursor:pointer;margin:12px 0">
-            <i class="fas fa-image" style="font-size:24px;color:#3a7b4d"></i>
+        <div class="upload-area" onclick="document.getElementById('adminPostImages').click()">
+            <i class="fas fa-image"></i>
             <div>Add Images</div>
         </div>
         <input type="file" id="adminPostImages" multiple accept="image/*" style="display:none" onchange="previewAdminPostImages(this)">
-        <div id="adminPostImagePreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+        <div id="adminPostImagePreview" class="product-images-container"></div>
         <div class="flex gap-2 mt-4">
             <button class="btn" onclick="createAdminPost()"><i class="fas fa-paper-plane"></i> Post</button>
             <button class="btn-outline" onclick="closeCreatePostModal()">Cancel</button>
@@ -5534,7 +5578,7 @@ textarea.input{min-height:80px;resize:vertical}
     </div>
 </div>
 
-<!-- Add/Edit Product Modal -->
+<!-- Add/Edit Product Modal with Price Tiers -->
 <div class="modal" id="adminProductModal">
     <div class="modal-content">
         <div class="modal-header">
@@ -5542,18 +5586,33 @@ textarea.input{min-height:80px;resize:vertical}
             <span class="modal-close" onclick="closeAdminProductModal()">&times;</span>
         </div>
         <div id="adminProductModalBody">
-            <input type="text" id="adminProdName" class="input" placeholder="Product name">
+            <input type="text" id="adminProdName" class="input" placeholder="Product name *">
             <textarea id="adminProdDesc" class="input" placeholder="Description"></textarea>
             <input type="text" id="adminProdCategory" class="input" placeholder="Category">
-            <div class="flex gap-2">
-                <input type="number" id="adminProdPrice" class="input" placeholder="Price (₱)" step="0.01">
+            <input type="number" id="adminProdPrice" class="input" placeholder="Base price (₱) *" step="0.01">
+            
+            <div class="tier-type-selector">
+                <div class="tier-type-btn active" onclick="setAdminTierType('quantity')">By Quantity</div>
+                <div class="tier-type-btn" onclick="setAdminTierType('size')">By Size</div>
             </div>
-            <div class="upload-area" onclick="document.getElementById('adminProdImages').click()" style="background:#f8faf8;border:1px dashed #c0d0c0;border-radius:16px;padding:16px;text-align:center;cursor:pointer;margin:12px 0">
-                <i class="fas fa-image" style="font-size:24px;color:#3a7b4d"></i>
+            
+            <div style="margin-top: 8px; margin-bottom: 8px;">
+                <div class="flex justify-between items-center">
+                    <span style="font-size: 13px; color: #2c3e2c; font-weight: 500;">Price Tiers (Optional)</span>
+                    <button class="btn-outline btn-sm" onclick="addAdminPriceTier()" style="padding: 4px 10px;">+ Add Tier</button>
+                </div>
+                <div id="adminPriceTiersContainer" style="margin-top: 8px;"></div>
+            </div>
+            
+            <div id="adminPriceNote" class="price-note">Add price tiers below for different sizes or quantities.</div>
+            
+            <div class="upload-area" onclick="document.getElementById('adminProdImages').click()">
+                <i class="fas fa-image"></i>
                 <div>Add Product Images</div>
             </div>
             <input type="file" id="adminProdImages" multiple accept="image/*" style="display:none" onchange="previewAdminProductImages(this)">
-            <div id="adminProductImagePreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+            <div id="adminProductImagePreview" class="product-images-container"></div>
+            
             <div class="flex gap-2 mt-4">
                 <button class="btn" onclick="saveAdminProduct()"><i class="fas fa-save"></i> Save Product</button>
                 <button class="btn-outline" onclick="closeAdminProductModal()">Cancel</button>
@@ -5568,6 +5627,8 @@ let adminData = null;
 let currentPage = 'stats';
 let currentVendorForProducts = null;
 let currentEditingProduct = null;
+let currentAdminPriceTiers = [];
+let currentAdminTierType = 'quantity';
 let editVendorMap = null;
 let editVendorMarker = null;
 let allPosts = [];
@@ -5910,7 +5971,7 @@ function previewAdminPostImages(input) {
     for (let i = 0; i < input.files.length; i++) {
         const reader = new FileReader();
         reader.onload = function(e) {
-            previewDiv.innerHTML += `<div style="position:relative;display:inline-block;margin-right:8px"><img src="${e.target.result}" style="width:70px;height:70px;object-fit:cover;border-radius:8px"><button type="button" style="position:absolute;top:-5px;right:-5px;background:#e53935;color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer" onclick="this.parentElement.remove()">×</button></div>`;
+            previewDiv.innerHTML += `<div class="image-preview"><img src="${e.target.result}"><div class="remove-img" onclick="this.parentElement.remove()">✖</div></div>`;
         };
         reader.readAsDataURL(input.files[i]);
     }
@@ -5924,14 +5985,10 @@ async function createAdminPost() {
     }
     
     const images = [];
-    const fileInput = document.getElementById('adminPostImages');
-    for (let i = 0; i < fileInput.files.length; i++) {
-        const reader = new FileReader();
-        const imgData = await new Promise((resolve) => {
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsDataURL(fileInput.files[i]);
-        });
-        images.push(imgData);
+    const previewDiv = document.getElementById('adminPostImagePreview');
+    const imgs = previewDiv.querySelectorAll('img');
+    for (let i = 0; i < imgs.length; i++) {
+        images.push(imgs[i].src);
     }
     
     const res = await api('/api/customer/post/create', { method: 'POST', body: JSON.stringify({ content, images }) });
@@ -6133,6 +6190,7 @@ function renderVendorProducts(products) {
                             <div style="color:#3a7b4d;font-weight:700">₱${p.price}</div>
                             <div class="text-secondary" style="font-size:11px">${escapeHtml(p.category || 'Uncategorized')}</div>
                             ${p.description ? `<div class="text-secondary mt-1" style="font-size:11px">${escapeHtml(p.description.substring(0, 60))}${p.description.length > 60 ? '...' : ''}</div>` : ''}
+                            ${p.priceTiers && p.priceTiers.length > 0 ? `<div class="mt-1"><div class="text-secondary" style="font-size:10px">Price options: ${p.priceTiers.map(t => `${escapeHtml(t.name)}:₱${t.price}`).join(', ')}</div></div>` : ''}
                         </div>
                         ${p.images && p.images[0] ? 
                             `<img src="${typeof p.images[0] === 'string' ? p.images[0] : (p.images[0].thumbnail || '')}" style="width:50px;height:50px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'">` : 
@@ -6140,7 +6198,7 @@ function renderVendorProducts(products) {
                         }
                     </div>
                     <div class="flex gap-2 mt-3">
-                        <button class="btn-outline btn-sm" onclick="editProductForVendor('${p.id}', '${escapeHtml(p.name)}', '${escapeHtml(p.description || '')}', '${escapeHtml(p.category || '')}', ${p.price})"><i class="fas fa-edit"></i> Edit</button>
+                        <button class="btn-outline btn-sm" onclick="editProductForVendor('${p.id}')"><i class="fas fa-edit"></i> Edit</button>
                         <button class="btn-outline btn-sm btn-danger" onclick="deleteProductForVendor('${p.id}')"><i class="fas fa-trash"></i> Delete</button>
                     </div>
                 </div>
@@ -6149,8 +6207,89 @@ function renderVendorProducts(products) {
     `;
 }
 
+function setAdminTierType(type) {
+    currentAdminTierType = type;
+    document.querySelectorAll('#adminProductModalBody .tier-type-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if ((type === 'quantity' && btn.innerText === 'By Quantity') || 
+            (type === 'size' && btn.innerText === 'By Size')) {
+            btn.classList.add('active');
+        }
+    });
+    renderAdminPriceTiers();
+}
+
+function addAdminPriceTier() {
+    if (currentAdminTierType === 'quantity') {
+        currentAdminPriceTiers.push({ name: 'Regular', quantity: 1, price: 0 });
+    } else {
+        currentAdminPriceTiers.push({ name: 'Small', price: 0 });
+    }
+    renderAdminPriceTiers();
+}
+
+function removeAdminPriceTier(index) {
+    currentAdminPriceTiers.splice(index, 1);
+    renderAdminPriceTiers();
+    updateAdminBasePriceState();
+}
+
+function updateAdminPriceTier(index, field, value) {
+    currentAdminPriceTiers[index][field] = value;
+    if (field === 'price') {
+        updateAdminBasePriceState();
+    }
+    renderAdminPriceTiers();
+}
+
+function updateAdminBasePriceState() {
+    const hasTiers = currentAdminPriceTiers.length > 0 && currentAdminPriceTiers.some(t => t.price > 0);
+    const basePriceInput = document.getElementById('adminProdPrice');
+    if (basePriceInput) {
+        if (hasTiers) {
+            basePriceInput.disabled = true;
+            basePriceInput.classList.add('disabled-input');
+            const lowestPrice = Math.min(...currentAdminPriceTiers.map(t => parseFloat(t.price) || 0));
+            if (lowestPrice > 0) {
+                basePriceInput.value = lowestPrice;
+                const note = document.getElementById('adminPriceNote');
+                if(note) note.innerHTML = 'Base price is now the lowest tier price. Edit tiers to change.';
+            }
+        } else {
+            basePriceInput.disabled = false;
+            basePriceInput.classList.remove('disabled-input');
+            const note = document.getElementById('adminPriceNote');
+            if(note) note.innerHTML = 'Add price tiers below for different sizes or quantities.';
+        }
+    }
+}
+
+function renderAdminPriceTiers() {
+    const container = document.getElementById('adminPriceTiersContainer');
+    if (!container) return;
+    if (currentAdminPriceTiers.length === 0) {
+        container.innerHTML = '<div class="text-secondary text-center" style="padding:12px">No price tiers added. Use base price above.</div>';
+    } else if (currentAdminTierType === 'quantity') {
+        let html = '';
+        for(let idx = 0; idx < currentAdminPriceTiers.length; idx++) {
+            let tier = currentAdminPriceTiers[idx];
+            html += `<div class="price-tier-item"><div class="price-tier-row" style="margin-bottom:8px"><input type="text" placeholder="Option name" class="input" value="${escapeHtml(tier.name)}" style="flex:2" onchange="updateAdminPriceTier(${idx}, 'name', this.value)"><input type="number" placeholder="Quantity" class="input" value="${tier.quantity}" style="flex:1" onchange="updateAdminPriceTier(${idx}, 'quantity', parseInt(this.value))"><input type="number" placeholder="Price" class="input" value="${tier.price}" style="flex:1" onchange="updateAdminPriceTier(${idx}, 'price', parseFloat(this.value))"><button class="remove-tier" onclick="removeAdminPriceTier(${idx})">✖</button></div><div class="text-secondary" style="font-size:11px;margin-top:4px">Display: ${escapeHtml(tier.name)} - ${tier.quantity} for ₱${tier.price}</div></div>`;
+        }
+        container.innerHTML = html;
+    } else {
+        let html = '';
+        for(let idx = 0; idx < currentAdminPriceTiers.length; idx++) {
+            let tier = currentAdminPriceTiers[idx];
+            html += `<div class="price-tier-item"><div class="price-tier-row" style="margin-bottom:8px"><input type="text" placeholder="Size name" class="input" value="${escapeHtml(tier.name)}" style="flex:2" onchange="updateAdminPriceTier(${idx}, 'name', this.value)"><input type="number" placeholder="Price" class="input" value="${tier.price}" style="flex:1" onchange="updateAdminPriceTier(${idx}, 'price', parseFloat(this.value))"><button class="remove-tier" onclick="removeAdminPriceTier(${idx})">✖</button></div><div class="text-secondary" style="font-size:11px;margin-top:4px">Display: ${escapeHtml(tier.name)} - ₱${tier.price}</div></div>`;
+        }
+        container.innerHTML = html;
+    }
+}
+
 function openAddProductForVendor() {
     currentEditingProduct = null;
+    currentAdminPriceTiers = [];
+    currentAdminTierType = 'quantity';
     document.getElementById('adminProductModalTitle').innerText = 'Add Product';
     document.getElementById('adminProdName').value = '';
     document.getElementById('adminProdDesc').value = '';
@@ -6158,31 +6297,67 @@ function openAddProductForVendor() {
     document.getElementById('adminProdPrice').value = '';
     document.getElementById('adminProductImagePreview').innerHTML = '';
     document.getElementById('adminProdImages').value = '';
+    
+    document.querySelectorAll('#adminProductModalBody .tier-type-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.innerText === 'By Quantity') btn.classList.add('active');
+    });
+    renderAdminPriceTiers();
+    updateAdminBasePriceState();
     document.getElementById('adminProductModal').classList.add('show');
 }
 
-function editProductForVendor(productId, name, description, category, price) {
+async function editProductForVendor(productId) {
+    const response = await api(`/api/admin/product/${productId}`);
+    if (!response || !response.product) {
+        showToast('Failed to load product data');
+        return;
+    }
+    
+    const p = response.product;
     currentEditingProduct = productId;
+    currentAdminPriceTiers = p.priceTiers || [];
+    currentAdminTierType = p.tierType || 'quantity';
+    
     document.getElementById('adminProductModalTitle').innerText = 'Edit Product';
-    document.getElementById('adminProdName').value = name;
-    document.getElementById('adminProdDesc').value = description;
-    document.getElementById('adminProdCategory').value = category;
-    document.getElementById('adminProdPrice').value = price;
-    document.getElementById('adminProductImagePreview').innerHTML = '';
-    document.getElementById('adminProdImages').value = '';
+    document.getElementById('adminProdName').value = p.name || '';
+    document.getElementById('adminProdDesc').value = p.description || '';
+    document.getElementById('adminProdCategory').value = p.category || '';
+    document.getElementById('adminProdPrice').value = p.price || '';
+    
+    document.querySelectorAll('#adminProductModalBody .tier-type-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if ((currentAdminTierType === 'quantity' && btn.innerText === 'By Quantity') || 
+            (currentAdminTierType === 'size' && btn.innerText === 'By Size')) {
+            btn.classList.add('active');
+        }
+    });
+    
+    renderAdminPriceTiers();
+    updateAdminBasePriceState();
+    
+    const previewDiv = document.getElementById('adminProductImagePreview');
+    previewDiv.innerHTML = '';
+    if (p.images && p.images.length) {
+        p.images.forEach(img => {
+            const imgUrl = typeof img === 'string' ? img : (img.thumbnail || img.full || img);
+            previewDiv.innerHTML += `<div class="image-preview"><img src="${imgUrl}"><div class="remove-img" onclick="this.parentElement.remove()">✖</div></div>`;
+        });
+    }
+    
     document.getElementById('adminProductModal').classList.add('show');
 }
 
 function previewAdminProductImages(input) {
     const previewDiv = document.getElementById('adminProductImagePreview');
-    previewDiv.innerHTML = '';
     for (let i = 0; i < input.files.length; i++) {
         const reader = new FileReader();
         reader.onload = function(e) {
-            previewDiv.innerHTML += `<div style="position:relative;display:inline-block;margin-right:8px"><img src="${e.target.result}" style="width:70px;height:70px;object-fit:cover;border-radius:8px"><button type="button" style="position:absolute;top:-5px;right:-5px;background:#e53935;color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer" onclick="this.parentElement.remove()">×</button></div>`;
+            previewDiv.innerHTML += `<div class="image-preview"><img src="${e.target.result}"><div class="remove-img" onclick="this.parentElement.remove()">✖</div></div>`;
         };
         reader.readAsDataURL(input.files[i]);
     }
+    input.value = '';
 }
 
 async function saveAdminProduct() {
@@ -6194,15 +6369,20 @@ async function saveAdminProduct() {
         return;
     }
     
+    let priceTiers = currentAdminPriceTiers.filter(t => t.price > 0 && t.name);
+    let finalPrice = price;
+    let tierType = currentAdminTierType;
+    
+    if (priceTiers.length > 0) {
+        const lowestPrice = Math.min(...priceTiers.map(t => parseFloat(t.price)));
+        finalPrice = lowestPrice;
+    }
+    
     const images = [];
-    const fileInput = document.getElementById('adminProdImages');
-    for (let i = 0; i < fileInput.files.length; i++) {
-        const reader = new FileReader();
-        const imgData = await new Promise((resolve) => {
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsDataURL(fileInput.files[i]);
-        });
-        images.push(imgData);
+    const previewDiv = document.getElementById('adminProductImagePreview');
+    const imgs = previewDiv.querySelectorAll('img');
+    for (let i = 0; i < imgs.length; i++) {
+        images.push(imgs[i].src);
     }
     
     const productData = {
@@ -6210,7 +6390,9 @@ async function saveAdminProduct() {
         name: name,
         description: document.getElementById('adminProdDesc').value,
         category: document.getElementById('adminProdCategory').value,
-        price: price,
+        price: finalPrice,
+        tierType: tierType,
+        priceTiers: priceTiers,
         images: images
     };
     
@@ -6250,6 +6432,8 @@ function closeVendorProductsModal() {
 function closeAdminProductModal() {
     document.getElementById('adminProductModal').classList.remove('show');
     currentEditingProduct = null;
+    currentAdminPriceTiers = [];
+    currentAdminTierType = 'quantity';
     document.getElementById('adminProdImages').value = '';
     document.getElementById('adminProductImagePreview').innerHTML = '';
 }
@@ -6365,7 +6549,7 @@ def forgot_password():
                 'otp_expiry': expiry
             }).eq('email', email).execute()
             
-            notifications.send_verification_code_email(email, otp, result.data[0].get('full_name'))
+            notifications.send_password_reset_otp_email(email, otp, result.data[0].get('full_name'))
             print(f"Reset OTP sent to email: {email} - OTP: {otp}")
             
         elif phone:
@@ -7977,6 +8161,25 @@ def delete_vendor_post():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/vendor/update-logo', methods=['POST'])
+def update_vendor_logo():
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'vendor':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    logo = data.get('logo')
+    
+    vendor = get_vendor_by_user_id(session['user_id'])
+    if not vendor:
+        return jsonify({'error': 'Vendor not found'}), 404
+    
+    try:
+        supabase.table('vendors').update({'logo': logo}).eq('id', vendor['id']).execute()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/vendor/analytics', methods=['GET'])
 def get_vendor_analytics():
     session = require_session(request.headers.get('X-Session-Token'))
@@ -8441,6 +8644,17 @@ def admin_api_get_vendor_products(vendor_id):
     result = supabase.table('products').select('*').eq('vendor_id', vendor_id).execute()
     return jsonify({'products': result.data})
 
+@app.route('/api/admin/product/<product_id>', methods=['GET'])
+def admin_api_get_product(product_id):
+    session = require_session(request.headers.get('X-Session-Token'))
+    if not session or session['role'] != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    result = supabase.table('products').select('*').eq('id', product_id).execute()
+    if result.data:
+        return jsonify({'product': result.data[0]})
+    return jsonify({'error': 'Product not found'}), 404
+
 @app.route('/api/admin/product/create', methods=['POST'])
 def admin_api_create_product():
     session = require_session(request.headers.get('X-Session-Token'))
@@ -8456,6 +8670,7 @@ def admin_api_create_product():
         'price': float(data.get('price', 0)),
         'images': data.get('images', []),
         'priceTiers': data.get('priceTiers', []),
+        'tierType': data.get('tierType', 'quantity'),
         'stock': data.get('stock', 0)
     }).execute()
     
@@ -8473,7 +8688,7 @@ def admin_api_update_product():
     product_id = data.get('product_id')
     
     update_data = {}
-    fields = ['name', 'description', 'category', 'price', 'images', 'priceTiers', 'stock']
+    fields = ['name', 'description', 'category', 'price', 'images', 'priceTiers', 'tierType', 'stock']
     for field in fields:
         if field in data:
             update_data[field] = data[field]

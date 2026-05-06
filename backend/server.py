@@ -298,7 +298,7 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
             display_name = name
             welcome_message = "You have full access to manage users, vendors, and platform analytics!"
             cta_text = "Go to Admin Panel"
-            cta_link = f"{BASE_URL}/admin"
+            cta_link = "https://templako.on.render.com"
             features = [
                 "📊 View platform statistics",
                 "👥 Manage all users and vendors",
@@ -313,7 +313,7 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
             display_name = name
             welcome_message = "Start exploring street food vendors near you in Tiaong, Quezon!"
             cta_text = "Start Exploring"
-            cta_link = f"{BASE_URL}/customer"
+            cta_link = "https://templako.on.render.com"
             features = [
                 "📍 Find street food vendors near you",
                 "📋 Browse menus with photos",
@@ -329,7 +329,7 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
             display_name = business_name or name
             welcome_message = "Start managing your business and reaching more customers in Tiaong, Quezon!"
             cta_text = "Go to Dashboard"
-            cta_link = f"{BASE_URL}/vendor"
+            cta_link = "https://templako.on.render.com"
             features = [
                 "📝 Manage your product catalog with photos",
                 "⏰ Set your operating hours",
@@ -415,7 +415,7 @@ Never share this code with anyone, even if they claim to be from {APP_NAME}.
 
 You now have full administrative access to manage users, vendors, and platform analytics.
 
-📊 Admin Dashboard: {BASE_URL}/admin
+📊 Admin Login: https://templako.on.render.com/auth
 
 {APP_NAME} - Platform Administrator"""
             
@@ -430,7 +430,7 @@ Start exploring street food vendors near you in Tiaong, Quezon!
 • Save favorites
 • Get directions
 
-📍 Download the app: {BASE_URL}/customer
+📍 Download the app: https://templako.on.render.com
 
 {APP_NAME} - Find the best street food in Tiaong!"""
             
@@ -446,7 +446,7 @@ Your business is now live on {APP_NAME}!
 • Track customer analytics
 • Create posts to engage customers
 
-📊 Vendor Dashboard: {BASE_URL}/vendor
+📊 Vendor login: https://templako.on.render.com/auth
 
 {APP_NAME} - Grow your food business in Tiaong!"""
         
@@ -456,42 +456,48 @@ Your business is now live on {APP_NAME}!
     # PASSWORD RESET
     # ============================================
     
-    def send_password_reset_email(self, email, reset_token, name=None):
-        """Send password reset email"""
+    def send_password_reset_otp_email(self, email, otp, name=None):
+        """Send password reset OTP via email"""
         display_name = name or "User"
-        reset_link = f"{BASE_URL}/reset-password?token={reset_token}"
         
         html = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Password Reset - {APP_NAME}</title>
             <style>
                 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
-                .container {{ max-width: 500px; margin: 0 auto; background: white; border-radius: 20px; overflow: hidden; }}
-                .header {{ background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 30px; text-align: center; }}
-                .header h1 {{ color: white; margin: 0; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+                .header {{ background: linear-gradient(135deg, #2d8c3c, #1a6b28); padding: 30px 20px; text-align: center; }}
+                .header h1 {{ color: white; margin: 0; font-size: 28px; }}
                 .content {{ padding: 30px; }}
-                .button {{ display: inline-block; background: #2d8c3c; color: white; text-decoration: none; padding: 12px 30px; border-radius: 30px; margin: 20px 0; }}
-                .warning {{ background: #fff3e0; padding: 15px; border-radius: 12px; font-size: 13px; margin-top: 20px; }}
+                .greeting {{ font-size: 18px; color: #1a2e1a; margin-bottom: 20px; }}
+                .code-box {{ background: #f5faf5; border-radius: 16px; padding: 25px; text-align: center; margin: 20px 0; border: 2px dashed #2d8c3c; }}
+                .code {{ font-size: 42px; font-weight: bold; letter-spacing: 8px; color: #2d8c3c; font-family: monospace; }}
+                .expiry {{ color: #6b8c6b; font-size: 13px; text-align: center; margin-top: 15px; }}
+                .warning {{ background: #fff3e0; padding: 12px; border-radius: 12px; font-size: 13px; color: #e65100; margin: 20px 0; }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
                     <h1>🔐 {APP_NAME}</h1>
-                    <p style="color: rgba(255,255,255,0.9);">Password Reset</p>
+                    <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0;">Password Reset</p>
                 </div>
                 <div class="content">
-                    <p>Hello {display_name},</p>
-                    <p>We received a request to reset your {APP_NAME} account password.</p>
-                    <div style="text-align: center;">
-                        <a href="{reset_link}" class="button">Reset Password</a>
+                    <div class="greeting">Hello {display_name},</div>
+                    <p>We received a request to reset your {APP_NAME} password. Use the code below to proceed.</p>
+                    
+                    <div class="code-box">
+                        <div class="code">{otp}</div>
                     </div>
-                    <p>This link will expire in <strong>1 hour</strong>.</p>
+
+                    <div class="expiry">⏰ This code expires in <strong>10 minutes</strong></div>
+
                     <div class="warning">
-                        ⚠️ If you didn't request a password reset, please ignore this email or contact support.
+                        ⚠️ If you didn't request a password reset, please ignore this email or contact support immediately.
                     </div>
                 </div>
             </div>
@@ -6365,7 +6371,7 @@ def forgot_password():
                 'otp_expiry': expiry
             }).eq('email', email).execute()
             
-            notifications.send_verification_code_email(email, otp, result.data[0].get('full_name'))
+            notifications.send_password_reset_otp_email(email, otp, result.data[0].get('full_name'))
             print(f"Reset OTP sent to email: {email} - OTP: {otp}")
             
         elif phone:
